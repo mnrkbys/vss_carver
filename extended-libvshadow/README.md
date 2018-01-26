@@ -1,7 +1,7 @@
 # extended-libvshadow
 The vshadowmount and libvshadow in here have been extended to read VSS catalog and store files (I wrote a patch based on libvshadow-20170902). This feature is expected to use together VSS catalog and store files that carved by vss_carver.py.
 
-You can get original source code here. [libvshadow](https://github.com/libyal/libvshadow)
+You can get its original source code here. [libvshadow](https://github.com/libyal/libvshadow)
 
 Now, only binary files are distributed, because I need refactoring of patch I made. I will release the patch in the near future. These binaries were compiled with Visual Studio 2015.
 

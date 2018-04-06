@@ -13,14 +13,13 @@ vss_carver.py -o <volume_offset> -i <path_to_disk_image> -c <catalog_file> -s <s
 ```
 vss_catalog_manipulator.py {list,move,remove,enable,disable} (see more details with "-h")
 ```
-3. Mounts VSS Snapshot with the use of extended vshadowmount (extended vshadowmount is [here](https://github.com/mnrkbys/vss_carver/tree/master/extended-libvshadow))
+3. Mounts VSS Snapshot with the use of extended vshadowmount (You can get extended vshadowmount from [here](https://github.com/mnrkbys/vss_carver/tree/master/extended-libvshadow))
 ```
-vshadowmount -o <volume_offset> -c <catalog_file> -s <store_file> <path_to_VSS_image> <mount_point>
+vshadowmount -o <volume_offset> -c <catalog_file> -s <store_file> <path_to_disk_image> <mount_point>
 ```
 
 ## Installation
     $ git clone https://github.com/mnrkbys/vss_carver
-
 
 ## Author
 [Minoru Kobayashi](https://twitter.com/unkn0wnbit)

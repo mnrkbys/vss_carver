@@ -15,6 +15,7 @@ import argparse
 import struct
 import copy
 import datetime
+import uuid
 from ctypes import *
 
 vss_identifier = b'\x6B\x87\x08\x38\x76\xC1\x48\x4E\xB7\xAE\x04\x04\x6E\x6C\xC7\x52'
@@ -67,7 +68,7 @@ class CatalogEntry0x02(LittleEndianStructure):
     _fields_ = (
         ('catalog_entry_type', c_uint64),
         ('volume_size', c_uint64),
-        ('store_guid', c_char * 16),
+        ('store_guid', c_ubyte * 16),
         ('sequence_number', c_uint64),
         ('unknown_flags', c_uint64),
         ('shadow_copy_creation_time', c_uint64),
@@ -84,7 +85,7 @@ class CatalogEntry0x03(LittleEndianStructure):
     _fields_ = (
         ('catalog_entry_type', c_uint64),
         ('store_block_list_offset', c_uint64),
-        ('store_guid', c_char * 16),
+        ('store_guid', c_ubyte * 16),
         ('store_header_offset', c_uint64),
         ('store_block_range_offset', c_uint64),
         ('store_current_bitmap_offset', c_uint64),
@@ -133,7 +134,7 @@ def read_catalog(f_catalog):
                 f_catalog.readinto(catalog_entry.catalog0x02)
                 f_catalog.readinto(catalog_entry.catalog0x03)
                 catalog_file_offset = catalog_file_offset + 128 * 2
-                if catalog_entry.catalog0x02.store_guid == catalog_entry.catalog0x03.store_guid:
+                if all(x == y for x, y in zip(catalog_entry.catalog0x02.store_guid, catalog_entry.catalog0x03.store_guid)):
                     list_catalog_entry.append(copy.deepcopy(catalog_entry))
                 else:
                     exit("Corrupt catalog format.")
@@ -187,7 +188,11 @@ def print_entry(list_catalog_entry):
             enable_state = "Enable"
         else:
             enable_state = "Disable"
-        print("[{0}] {1}, Date: {2}, GUID: {3}".format(index, enable_state, dt, entry.catalog0x02.store_guid))
+
+        guid = bytearray(len(entry.catalog0x02.store_guid))
+        for i in range(len(entry.catalog0x02.store_guid)):
+            guid[i] = entry.catalog0x02.store_guid[i]
+        print("[{0}] {1}, Date: {2}, GUID: {3}".format(index, enable_state, dt, str(uuid.UUID(bytes_le=bytes(guid)))))
         index = index + 1
 
 

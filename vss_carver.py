@@ -11,6 +11,7 @@
 # https://opensource.org/licenses/MIT
 #
 
+import os
 import argparse
 import struct
 import binascii
@@ -377,45 +378,18 @@ def group_store_block(list_store_block_chunk, debug):
 
 
 def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_block_offset):
-    if next_block_offset in dict_store_block:
-        if dict_store_block[next_block_offset].next_block_offset in dict_store_block:
-            list_next_block_offset.append(dict_store_block[next_block_offset].next_block_offset)
-        else:
-            list_next_block_offset.append(0x0)
-            return False
-
-        if dict_store_block[next_block_offset].next_block_offset == 0x0:
-            return True
-        else:
-            result = make_list_next_block_offset(dict_store_block, list_next_block_offset, dict_store_block[next_block_offset].next_block_offset)
-            if result:
-                return True
+    while True:
+        if next_block_offset in dict_store_block:
+            if dict_store_block[next_block_offset].next_block_offset in dict_store_block:
+                list_next_block_offset.append(dict_store_block[next_block_offset].next_block_offset)
             else:
+                list_next_block_offset.append(0x0)
                 return False
 
-    else:
-        # list_next_block_offset.append( 0xFFFFFFFFFFFFFFFF )
-        # return False, list_next_block_offset
-
-        # Create dummy store block
-        for expansion in range(0x4000, 0x100000, 0x4000):
-            # if dict_store_block.has_key(next_block_offset + expansion) and dict_store_block[next_block_offset + expansion].record_type == 3:
-            if (next_block_offset + expansion) in dict_store_block and dict_store_block[next_block_offset + expansion].record_type == 3:
-                for count in range(expansion//0x4000):
-                    offset = count * 0x4000
-                    dict_store_block[next_block_offset + offset] = copy.deepcopy(StoreBlockHeader())
-                    dict_store_block[next_block_offset + offset].vssid = vss_identifier
-                    dict_store_block[next_block_offset + offset].version = 0x1
-                    dict_store_block[next_block_offset + offset].record_type = 0x3
-                    dict_store_block[next_block_offset + offset].next_block_offset = next_block_offset + ((count + 1) * 0x4000)
-                    dict_store_block[next_block_offset + offset].size_info = 0x0
-                    dict_store_block[next_block_offset + offset].flag_dummy = True
-
-                    list_next_block_offset.append(next_block_offset)
+            if dict_store_block[next_block_offset].next_block_offset == 0x0:
                 return True
 
-        list_next_block_offset.append(0x0)
-        return False
+            next_block_offset = dict_store_block[next_block_offset].next_block_offset
 
 
 def check_store_block_next_block_offset(dict_store_block, list_snapshot_set, debug):
@@ -675,8 +649,6 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
                         store_block.next_block_offset = store_file_offset + 0x4000
                     f_store.write(store_block)
                     store_file_offset = store_file_offset + 0x4000
-        # f_store.write( store_block )
-        # store_file_offset = store_file_offset + 0x4000
 
         #
         # Store Range
@@ -796,9 +768,7 @@ def write_catalog(catalog_file, list_disk_catalog_entry, list_snapshot_set, cata
         list_catalog_entry.append(copy.deepcopy((catalog0x02, catalog0x03[-index_list_catalog])))
         index_list_catalog = index_list_catalog + 1
 
-    print("writing catalog file.")
     index_list_disk_catalog = 0
-    # index_list_catalog = len(list_catalog_entry)
     index_list_catalog = 0
     f_catalog = open(catalog_file, "wb")
     for catalog_offset in [0x0, 0x4000, 0x8000, 0xc000]:
@@ -855,6 +825,8 @@ def main():
                         help='path to catalog file.')
     parser.add_argument('-s', '--store', type=str,
                         help='path to store file.')
+    parser.add_argument('-f', '--force', action='store_true', default=False,
+                        help='enabling to overwrite a catalog file and a store file (default: False)')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='debug mode if this flag is set (default: False)')
     args = parser.parse_args()
@@ -862,13 +834,19 @@ def main():
     if args.image is None or args.catalog is None or args.store is None:
         exit("too few arguments.")
 
-    # win10en : 525336576
-    # seccamp-win7 : 105906176
+    if os.path.exists(os.path.abspath(args.image)):
+        disk_image = open(args.image, "rb")
+    else:
+        exit("{0} does not exist.".format(args.image))
 
-    disk_image = open(args.image, "rb")
+    if os.path.exists(os.path.abspath(args.catalog)) and not args.force:
+        exit("{0} has already existed.".format(args.catalog))
+
+    if os.path.exists(os.path.abspath(args.store)) and not args.force:
+        exit("{0} has already existed.".format(args.store))
 
     print("="*50)
-    print("Stage 1: Check VSS enabled.")
+    print("Stage 1: Checking if VSS is enabled.")
     catalog_offset, volume_size = check_vss_enable(disk_image, args.offset)
 
     print("=" * 50)
@@ -893,7 +871,7 @@ def main():
     check_store_block_next_block_offset(dict_store_block, list_snapshot_set, args.debug)
 
     print("="*50)
-    print("Stage 6: Deduplicate carved catalog entries.")
+    print("Stage 6: Deduplicating carved catalog entries.")
     deduplicate_catalog(dict_disk_catalog_entry, list_snapshot_set)
 
     print("="*50)

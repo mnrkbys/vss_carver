@@ -7,7 +7,7 @@ Carves and recreates VSS catalog and store from Windows disk image.
 ## Usage
 1. Carves and creates VSS catalog and store
 ```
-vss_carver.py -o <volume_offset> -i <path_to_disk_image> -c <catalog_file> -s <store_file>
+vss_carver.py -o <volume_offset_in_bytes> -i <path_to_disk_image> -c <catalog_file> -s <store_file>
 ```
 2. (Optional) Manipulates VSS catalog entries
 ```
@@ -15,7 +15,7 @@ vss_catalog_manipulator.py {list,move,remove,enable,disable} (see more details w
 ```
 3. Mounts VSS Snapshot with the use of extended vshadowmount (You can get extended vshadowmount from [here](https://github.com/mnrkbys/vss_carver/tree/master/extended-libvshadow))
 ```
-vshadowmount -o <volume_offset> -c <catalog_file> -s <store_file> <path_to_disk_image> <mount_point>
+vshadowmount -o <volume_offset_in_bytes> -c <catalog_file> -s <store_file> <path_to_disk_image> <mount_point>
 ```
 
 ## Installation

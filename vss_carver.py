@@ -831,7 +831,7 @@ def main():
                         help='debug mode if this flag is set (default: False)')
     args = parser.parse_args()
 
-    if args.image is None or args.catalog is None or args.store is None:
+    if None in (args.image, args.offset, args.catalog, args.store):
         exit("too few arguments.")
 
     if os.path.exists(os.path.abspath(args.image)):

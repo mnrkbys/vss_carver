@@ -137,7 +137,14 @@ def read_catalog(f_catalog):
                 if all(x == y for x, y in zip(catalog_entry.catalog0x02.store_guid, catalog_entry.catalog0x03.store_guid)):
                     list_catalog_entry.append(copy.deepcopy(catalog_entry))
                 else:
-                    exit("Corrupt catalog format.")
+                    guid = bytearray(len(catalog_entry.catalog0x02.store_guid))
+                    for i in range(len(catalog_entry.catalog0x02.store_guid)):
+                        guid[i] = catalog_entry.catalog0x02.store_guid[i]
+                    print("Catalog Entry Type 0x02 GUID: {0}".format(str(uuid.UUID(bytes_le=bytes(guid)))))
+                    for i in range(len(catalog_entry.catalog0x03.store_guid)):
+                        guid[i] = catalog_entry.catalog0x03.store_guid[i]
+                    print("Catalog Entry Type 0x03 GUID: {0}".format(str(uuid.UUID(bytes_le=bytes(guid)))))
+                    exit(" Catalog GUID doesn't match.")
             elif catalog_entry_type == 0x1 and data != 0x0:
                 catalog_entry.enable = False
                 f_catalog.readinto(catalog_entry.catalog0x02)

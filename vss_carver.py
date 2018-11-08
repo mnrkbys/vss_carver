@@ -12,6 +12,7 @@
 #
 
 import os
+import sys
 import argparse
 import struct
 import binascii
@@ -95,7 +96,7 @@ class CatalogEntry0x02(LittleEndianStructure):
     _fields_ = (
         ('catalog_entry_type', c_uint64),
         ('volume_size', c_uint64),
-        ('store_guid', c_char * 16),
+        ('store_guid', c_ubyte * 16),
         ('sequence_number', c_uint64),
         ('unknown_flags', c_uint64),
         ('shadow_copy_creation_time', c_uint64),
@@ -112,7 +113,7 @@ class CatalogEntry0x03(LittleEndianStructure):
     _fields_ = (
         ('catalog_entry_type', c_uint64),
         ('store_block_list_offset', c_uint64),
-        ('store_guid', c_char * 16),
+        ('store_guid', c_ubyte * 16),
         ('store_header_offset', c_uint64),
         ('store_block_range_offset', c_uint64),
         ('store_current_bitmap_offset', c_uint64),
@@ -224,24 +225,34 @@ def read_catalog_from_disk_image(disk_image, volume_offset, catalog_offset):
             if catalog_entry_type == 0x2:
                 disk_image.readinto(catalog0x02)
                 # if dict_disk_catalog_entry.has_key(catalog0x02.store_guid):
-                if catalog0x02.store_guid in dict_disk_catalog_entry:
-                    dict_disk_catalog_entry[catalog0x02.store_guid][0] = copy.deepcopy(catalog0x02)
+                # if catalog0x02.store_guid in dict_disk_catalog_entry:
+                guid = struct.unpack("16s", catalog0x02.store_guid)[0]
+                if guid in dict_disk_catalog_entry:
+                    # dict_disk_catalog_entry[catalog0x02.store_guid][0] = copy.deepcopy(catalog0x02)
+                    dict_disk_catalog_entry[guid] = copy.deepcopy(catalog0x02)
                     list_disk_catalog_entry[index_disk_catalog_entry][0] = copy.deepcopy(catalog0x02)
                 else:
-                    dict_disk_catalog_entry[catalog0x02.store_guid] = copy.deepcopy(['', ''])
-                    dict_disk_catalog_entry[catalog0x02.store_guid][0] = copy.deepcopy(catalog0x02)
+                    # dict_disk_catalog_entry[catalog0x02.store_guid] = copy.deepcopy(['', ''])
+                    # dict_disk_catalog_entry[catalog0x02.store_guid][0] = copy.deepcopy(catalog0x02)
+                    dict_disk_catalog_entry[guid] = copy.deepcopy(['', ''])
+                    dict_disk_catalog_entry[guid][0] = copy.deepcopy(catalog0x02)
                     list_disk_catalog_entry.append(copy.deepcopy(['', '']))
                     list_disk_catalog_entry[index_disk_catalog_entry][0] = copy.deepcopy(catalog0x02)
             elif catalog_entry_type == 0x3:
                 disk_image.readinto(catalog0x03)
                 # if dict_disk_catalog_entry.has_key(catalog0x03.store_guid):
-                if catalog0x03.store_guid in dict_disk_catalog_entry:
-                    dict_disk_catalog_entry[catalog0x03.store_guid][1] = copy.deepcopy(catalog0x03)
+                # if catalog0x03.store_guid in dict_disk_catalog_entry:
+                guid = struct.unpack("16s", catalog0x03.store_guid)[0]
+                if guid in dict_disk_catalog_entry:
+                    # dict_disk_catalog_entry[catalog0x03.store_guid][1] = copy.deepcopy(catalog0x03)
+                    dict_disk_catalog_entry[guid][1] = copy.deepcopy(catalog0x03)
                     list_disk_catalog_entry[index_disk_catalog_entry][1] = copy.deepcopy(catalog0x03)
                     index_disk_catalog_entry = index_disk_catalog_entry + 1
                 else:
-                    dict_disk_catalog_entry[catalog0x03.store_guid] = copy.deepcopy(['', ''])
-                    dict_disk_catalog_entry[catalog0x03.store_guid][1] = copy.deepcopy(catalog0x03)
+                    # dict_disk_catalog_entry[catalog0x03.store_guid] = copy.deepcopy(['', ''])
+                    # dict_disk_catalog_entry[catalog0x03.store_guid][1] = copy.deepcopy(catalog0x03)
+                    dict_disk_catalog_entry[guid] = copy.deepcopy(['', ''])
+                    dict_disk_catalog_entry[guid][1] = copy.deepcopy(catalog0x03)
                     list_disk_catalog_entry.append(copy.deepcopy(['', '']))
                     list_disk_catalog_entry[index_disk_catalog_entry][0] = copy.deepcopy(catalog0x03)
             else:
@@ -256,7 +267,7 @@ def read_catalog_from_disk_image(disk_image, volume_offset, catalog_offset):
     return dict_disk_catalog_entry, list_disk_catalog_entry
 
 
-def carve_data_block(disk_image, image_offset, debug):
+def carve_data_block(disk_image, image_offset, volume_size, debug):
     chunk_head = 0
     chunk_head_record_type = 0
     chunk_continue = 0
@@ -264,10 +275,15 @@ def carve_data_block(disk_image, image_offset, debug):
     list_store_block_chunk = []
     index_store_block_chunk = 0
     store_block_header = StoreBlockHeader()
+    offset_base = image_offset
 
     if debug:
         print("Searching store block chunks.")
     while disk_image.readinto(store_block_header):
+        if not ((image_offset - offset_base) % 0x40000000): # 0x40000000 = 1GB
+            sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - offset_base), volume_size, ((image_offset - offset_base)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
+            sys.stderr.flush()
+
         if store_block_header.vssid == vss_identifier and store_block_header.version == 1:
             if store_block_header.record_type in [2, 3, 4, 5, 6]:
                 dict_store_block[store_block_header.current_block_offset] = copy.deepcopy(store_block_header)
@@ -310,6 +326,9 @@ def carve_data_block(disk_image, image_offset, debug):
 
         image_offset = image_offset + 0x4000
         disk_image.seek(image_offset)
+
+    sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - offset_base), volume_size, ((image_offset - offset_base)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")) + '\r\n')
+    sys.stderr.flush()
 
     return dict_store_block, list_store_block_chunk
 
@@ -759,11 +778,13 @@ def write_catalog(catalog_file, list_disk_catalog_entry, list_snapshot_set, cata
         guid = uuid.uuid1().bytes
 
         catalog0x02.volume_size = volume_size
-        catalog0x02.store_guid = guid
+        # catalog0x02.store_guid = guid
+        struct.pack_into('%is' % len(guid), catalog0x02.store_guid, 0, guid)
         catalog0x02.sequence_number = sequence_number - index_list_catalog
         catalog0x02.shadow_copy_creation_time = creation_time - hundreds_of_nanoseconds * 60 * 60 * index_list_catalog
 
-        catalog0x03[-index_list_catalog].store_guid = guid
+        # catalog0x03[-index_list_catalog].store_guid = guid
+        struct.pack_into('%is' % len(guid), catalog0x03[-index_list_catalog].store_guid, 0, guid)
 
         list_catalog_entry.append(copy.deepcopy((catalog0x02, catalog0x03[-index_list_catalog])))
         index_list_catalog = index_list_catalog + 1
@@ -860,7 +881,7 @@ def main():
 
     print("="*50)
     print("Stage 3: Carving data blocks.")
-    dict_store_block, list_store_block_chunk = carve_data_block(disk_image, args.offset, args.debug)
+    dict_store_block, list_store_block_chunk = carve_data_block(disk_image, args.offset, volume_size, args.debug)
 
     print("="*50)
     print("Stage 4: Grouping store blocks by VSS snapshot.")

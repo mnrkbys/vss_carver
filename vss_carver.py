@@ -313,6 +313,7 @@ def carve_data_block(disk_image, image_offset, volume_size, debug):
                 chunk_head = 0
                 chunk_head_record_type = 0
                 chunk_continue = 0
+                image_offset = image_offset - 0x4000
 
         else:
             if chunk_continue == 0:
@@ -360,7 +361,6 @@ def group_store_block(list_store_block_chunk, debug):
                 dict_snapshot['prev_bitmap'] = chunk
                 list_snapshot_set.append(copy.deepcopy(dict_snapshot))
                 index_snapshot_store = 0
-                # flag_get_snapshot = True
                 flag_get_snapshot = False
 
         elif chunk.head.record_type == 4 and index_snapshot_store == 4:
@@ -368,7 +368,6 @@ def group_store_block(list_store_block_chunk, debug):
             list_snapshot_set.append(copy.deepcopy(dict_snapshot))
             dict_snapshot['header'] = chunk
             index_snapshot_store = 1
-            # flag_get_snapshot = True
             flag_get_snapshot = False
 
         else:
@@ -383,18 +382,27 @@ def group_store_block(list_store_block_chunk, debug):
     if debug:
         print("dump list_snapshot_set")
         for store in list_snapshot_set:
-            print("header: {0}: RType:{1} Offset:{2}".format(hex(store['header'].head.current_block_offset), store['header'].head.record_type, store['header'].list_next_block_offset))
-            print("block : {0}: RType:{1} Offset:{2}".format(hex(store['block'].head.current_block_offset), store['block'].head.record_type, store['block'].list_next_block_offset))
-            print("range : {0}: RType:{1} Offset:{2}".format(hex(store['range'].head.current_block_offset), store['range'].head.record_type, store['range'].list_next_block_offset))
-            print("curr  : {0}: RType:{1} Offset:{2}".format(hex(store['cur_bitmap'].head.current_block_offset), store['cur_bitmap'].head.record_type, store['cur_bitmap'].list_next_block_offset))
-            print("prev  : {0}: RType:{1} Offset:{2}\n".format(hex(store['prev_bitmap'].head.current_block_offset), store['prev_bitmap'].head.record_type, store['prev_bitmap'].list_next_block_offset))
+            print("header: {0}: RType:{1} Offset:{2}".format(hex(store['header'].head.current_block_offset), store['header'].head.record_type, [hex(x) for x in store['header'].list_next_block_offset]))
+            print("block : {0}: RType:{1} Offset:{2}".format(hex(store['block'].head.current_block_offset), store['block'].head.record_type, [hex(x) for x in store['block'].list_next_block_offset]))
+            print("range : {0}: RType:{1} Offset:{2}".format(hex(store['range'].head.current_block_offset), store['range'].head.record_type, [hex(x) for x in store['range'].list_next_block_offset]))
+            print("curr  : {0}: RType:{1} Offset:{2}".format(hex(store['cur_bitmap'].head.current_block_offset), store['cur_bitmap'].head.record_type, [hex(x) for x in store['cur_bitmap'].list_next_block_offset]))
+            print("prev  : {0}: RType:{1} Offset:{2}\n".format(hex(store['prev_bitmap'].head.current_block_offset), store['prev_bitmap'].head.record_type, [hex(x) for x in store['prev_bitmap'].list_next_block_offset]))
 
     return list_snapshot_set
 
 
-def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_block_offset):
+def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_block_offset, debug, dict_referred_offset):
     while True:
         if next_block_offset in dict_store_block:
+            if debug:
+                if next_block_offset in dict_referred_offset:
+                    print("Data block offset: {0} -> Next: {1}".format(hex(before_next_block_offset), hex(next_block_offset)))
+                    print("Offset {0} is referred from multiple data blocks: {1}".format(hex(next_block_offset), [hex(x) for x in dict_referred_offset[next_block_offset]]))
+                else:
+                    dict_referred_offset[next_block_offset] = []
+                if next_block_offset != 0x0:
+                    dict_referred_offset[next_block_offset].append(next_block_offset)
+
             if dict_store_block[next_block_offset].next_block_offset in dict_store_block:
                 list_next_block_offset.append(dict_store_block[next_block_offset].next_block_offset)
             else:
@@ -404,27 +412,35 @@ def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_b
             if dict_store_block[next_block_offset].next_block_offset == 0x0:
                 return True
 
+            before_next_block_offset = next_block_offset
             next_block_offset = dict_store_block[next_block_offset].next_block_offset
 
 
 def check_store_block_next_block_offset(dict_store_block, list_snapshot_set, debug):
+    dict_referred_offset = {}
+
     for store in list_snapshot_set:
         for record_type in store.keys():
             chunk = store[record_type]
             if chunk.head.next_block_offset != 0x0:
-                result = make_list_next_block_offset(dict_store_block, chunk.list_next_block_offset, chunk.head.next_block_offset)
+                result = make_list_next_block_offset(dict_store_block, chunk.list_next_block_offset, chunk.head.next_block_offset, debug, dict_referred_offset)
 
             if len(chunk.list_next_block_offset) >= 2 and dict_store_block[chunk.list_next_block_offset[-2]].next_block_offset != 0x0:
                 dict_store_block[chunk.list_next_block_offset[-2]].next_block_offset = 0x0
 
     if debug:
+        print("dump dict_referred_offset (display offsets that are referred from multiple data blocks only)")
+        for block_offset in dict_referred_offset:
+            if len(dict_referred_offset[block]) > 1:
+                print("{0} is referred from {1}".format(hex(block_offset), [hex(x) for x in dict_referred_offset[block_offset]]))
+
         print("dump list_snapshot_set")
         for store in list_snapshot_set:
-            print("header: {0}: RType:{1} Offset:{2}".format(hex(store['header'].head.current_block_offset), store['header'].head.record_type, store['header'].list_next_block_offset))
-            print("block : {0}: RType:{1} Offset:{2}".format(hex(store['block'].head.current_block_offset), store['block'].head.record_type, store['block'].list_next_block_offset))
-            print("range : {0}: RType:{1} Offset:{2}".format(hex(store['range'].head.current_block_offset), store['range'].head.record_type, store['range'].list_next_block_offset))
-            print("curr  : {0}: RType:{1} Offset:{2}".format(hex(store['cur_bitmap'].head.current_block_offset), store['cur_bitmap'].head.record_type, store['cur_bitmap'].list_next_block_offset))
-            print("prev  : {0}: RType:{1} Offset:{2}\n".format(hex(store['prev_bitmap'].head.current_block_offset), store['prev_bitmap'].head.record_type, store['prev_bitmap'].list_next_block_offset))
+            print("header: {0}: RType:{1} Offset:{2}".format(hex(store['header'].head.current_block_offset), store['header'].head.record_type, [hex(x) for x in store['header'].list_next_block_offset]))
+            print("block : {0}: RType:{1} Offset:{2}".format(hex(store['block'].head.current_block_offset), store['block'].head.record_type, [hex(x) for x in store['block'].list_next_block_offset]))
+            print("range : {0}: RType:{1} Offset:{2}".format(hex(store['range'].head.current_block_offset), store['range'].head.record_type, [hex(x) for x in store['range'].list_next_block_offset]))
+            print("curr  : {0}: RType:{1} Offset:{2}".format(hex(store['cur_bitmap'].head.current_block_offset), store['cur_bitmap'].head.record_type, [hex(x) for x in store['cur_bitmap'].list_next_block_offset]))
+            print("prev  : {0}: RType:{1} Offset:{2}\n".format(hex(store['prev_bitmap'].head.current_block_offset), store['prev_bitmap'].head.record_type, [hex(x) for x in store['prev_bitmap'].list_next_block_offset]))
 
     return list_snapshot_set
 

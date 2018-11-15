@@ -3,6 +3,7 @@ Carves and recreates VSS catalog and store from Windows disk image.
 
 ## Requirement
 - Python 3.6+ or Python 2.7+
+- High speed CPU and high speed I/O storage
 
 ## Usage
 1. Carves and creates VSS catalog and store
@@ -20,6 +21,10 @@ vshadowmount -o <volume_offset_in_bytes> -c <catalog_file> -s <store_file> <path
 
 ## Installation
     $ git clone https://github.com/mnrkbys/vss_carver
+
+## Limitation
+vss_carver.py only supports raw disk images.
+Therefore, E01, VMDK, VHDX and other disk images are needed to convert into a raw disk image or mount as a raw disk image with libewf, libvmdk and so on.
 
 ## Author
 [Minoru Kobayashi](https://twitter.com/unkn0wnbit)

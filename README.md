@@ -23,8 +23,7 @@ vshadowmount -o <volume_offset_in_bytes> -c <catalog_file> -s <store_file> <path
     $ git clone https://github.com/mnrkbys/vss_carver
 
 ## Limitation
-vss_carver.py only supports raw disk images.
-Therefore, E01, VMDK, VHDX and other disk images are needed to convert into a raw disk image or mount as a raw disk image with libewf, libvmdk and so on.
+vss_carver.py only supports raw disk images. Therefore, E01, VMDK, VHDX and other disk images are needed to convert into a raw disk image or mount as a raw disk image with libewf, libvmdk and so on.
 
 ## Author
 [Minoru Kobayashi](https://twitter.com/unkn0wnbit)

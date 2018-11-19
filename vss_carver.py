@@ -392,16 +392,19 @@ def group_store_block(list_store_block_chunk, debug):
 
 
 def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_block_offset, debug, dict_referred_offset):
+    before_next_block_offset = 0x0
+
     while True:
         if next_block_offset in dict_store_block:
             if debug:
-                if next_block_offset in dict_referred_offset:
+                if next_block_offset in dict_referred_offset and len(dict_referred_offset[next_block_offset]) > 1:
                     print("Data block offset: {0} -> Next: {1}".format(hex(before_next_block_offset), hex(next_block_offset)))
                     print("Offset {0} is referred from multiple data blocks: {1}".format(hex(next_block_offset), [hex(x) for x in dict_referred_offset[next_block_offset]]))
-                else:
-                    dict_referred_offset[next_block_offset] = []
-                if next_block_offset != 0x0:
-                    dict_referred_offset[next_block_offset].append(next_block_offset)
+                elif dict_store_block[next_block_offset].next_block_offset != 0x0:
+                    dict_referred_offset[dict_store_block[next_block_offset].next_block_offset] = []
+
+                if dict_store_block[next_block_offset].next_block_offset != 0x0:
+                    dict_referred_offset[dict_store_block[next_block_offset].next_block_offset].append(next_block_offset)
 
             if dict_store_block[next_block_offset].next_block_offset in dict_store_block:
                 list_next_block_offset.append(dict_store_block[next_block_offset].next_block_offset)
@@ -431,9 +434,10 @@ def check_store_block_next_block_offset(dict_store_block, list_snapshot_set, deb
     if debug:
         print("dump dict_referred_offset (display offsets that are referred from multiple data blocks only)")
         for block_offset in dict_referred_offset:
-            if len(dict_referred_offset[block]) > 1:
+            if len(dict_referred_offset[block_offset]) > 1:
                 print("{0} is referred from {1}".format(hex(block_offset), [hex(x) for x in dict_referred_offset[block_offset]]))
 
+        print("\n")
         print("dump list_snapshot_set")
         for store in list_snapshot_set:
             print("header: {0}: RType:{1} Offset:{2}".format(hex(store['header'].head.current_block_offset), store['header'].head.record_type, [hex(x) for x in store['header'].list_next_block_offset]))

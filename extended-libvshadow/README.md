@@ -1,4 +1,5 @@
 # extended-libvshadow
+
 The vshadowmount and libvshadow in here have been extended to read restored VSS catalog and store files (I wrote a patch based on the source code of libvshadow with "git clone" on Sep. 13, 2018). This feature is expected to use together VSS catalog and store files that carved by vss_carver.py.
 
 You can get its original source code here. [libvshadow](https://github.com/libyal/libvshadow)
@@ -11,11 +12,14 @@ Binary files that I built are distributed in this repository. Windows binaries w
 If you need to run extended-libvshadow on other platforms, you have to compile its source code on them. In that case, you should refer to [libvshadow wiki](https://github.com/libyal/libvshadow/wiki/Building).
 
 ## Requirement
+
 - Dokany 0.7.4 (on Windows)
 
 ## Usage
+
 I added two new options, "-c" and "-s".
-```
+
+```cmd
 >vshadowmount.exe -h
 vshadowmount 20180403
 
@@ -38,13 +42,17 @@ Usage: vshadowmount [ -o offset ] [ -X extended_options ]
 ```
 
 ## Installation
-    $ git clone https://github.com/mnrkbys/vss_carver
 
+```bash
+git clone https://github.com/mnrkbys/vss_carver
+```
 
 ## Author
+
 Original Author: [Joachim Metz](https://github.com/joachimmetz)
 
 Patch Author: [Minoru Kobayashi](https://twitter.com/unkn0wnbit)
 
 ## License
+
 [LGPLv3+](http://www.gnu.org/licenses/)

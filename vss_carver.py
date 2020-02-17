@@ -265,18 +265,18 @@ def carve_data_block(disk_image, image_offset, volume_size, debug):
     list_store_block_chunk = []
     index_store_block_chunk = 0
     store_block_header = StoreBlockHeader()
-    offset_base = image_offset
+    base_offset = image_offset
     before_time = datetime.datetime.now()
 
     if debug:
         print("Searching store block chunks.")
 
     print("Started at {0}".format(before_time.strftime("%Y/%m/%d %H:%M:%S")))
-    while disk_image.readinto(store_block_header) and ((image_offset - offset_base) < volume_size):
+    while disk_image.readinto(store_block_header) and ((image_offset - base_offset) < volume_size):
         current_time = datetime.datetime.now()
         if (current_time - before_time).seconds >= 3:
             before_time = current_time
-            sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - offset_base), volume_size, ((image_offset - offset_base)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
+            sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - base_offset), volume_size, ((image_offset - base_offset)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
             sys.stderr.flush()
 
         if store_block_header.vssid == vss_identifier and store_block_header.version == 1:
@@ -323,7 +323,7 @@ def carve_data_block(disk_image, image_offset, volume_size, debug):
         image_offset = image_offset + 0x4000
         disk_image.seek(image_offset)
 
-    sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - offset_base), volume_size, ((image_offset - offset_base)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")) + '\r\n')
+    sys.stderr.write('\r' + "Progress: {0} / {1} bytes ({2:.2%}) at {3}".format((image_offset - base_offset), volume_size, ((image_offset - base_offset)/volume_size), datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")) + '\r\n')
     sys.stderr.flush()
     print("Finished at {0}".format(datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
 

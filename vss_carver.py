@@ -418,6 +418,12 @@ def make_list_next_block_offset(dict_store_block, list_next_block_offset, next_b
             before_next_block_offset = next_block_offset
             next_block_offset = dict_store_block[next_block_offset].next_block_offset
 
+        else:
+            if debug:
+                print("Next block offset {} was not carved".format(hex(next_block_offset)))
+            list_next_block_offset[-1] = 0x0
+            return False
+
 
 def check_store_block_next_block_offset(dict_store_block, list_snapshot_set, debug):
     dict_referred_offset = {}

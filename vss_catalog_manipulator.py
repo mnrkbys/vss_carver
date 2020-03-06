@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
-
 #
 # vss_catalog_manipulator.py
 # Manipulates VSS catalog file that recreated by vss_carver.py.

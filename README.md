@@ -4,7 +4,9 @@ Carves and recreates VSS catalog and store from Windows disk image.
 
 ## Requirement
 
-- Python 3.6+ or Python 2.7+
+- Python 3.7+ (I tested on Python 3.7.6)
+- pyewf
+- pyvmdk
 - High speed CPU and high speed I/O storage
 
 ## Usage
@@ -12,7 +14,7 @@ Carves and recreates VSS catalog and store from Windows disk image.
 1. Carves and creates VSS catalog and store
 
 ```bash
-vss_carver.py -o <volume_offset_in_bytes> -i <path_to_disk_image> -c <catalog_file> -s <store_file>
+vss_carver.py -t <disk_image_type> -o <volume_offset_in_bytes> -i <disk_image> -c <catalog_file> -s <store_file>
 ```
 
 2. (Optional) Manipulates VSS catalog entries
@@ -27,15 +29,24 @@ vss_catalog_manipulator.py {list,move,remove,enable,disable} (see more details w
 vshadowmount -o <volume_offset_in_bytes> -c <catalog_file> -s <store_file> <path_to_disk_image> <mount_point>
 ```
 
-## Installation
+## Installation of vss_carver
 
 ```bash
 git clone https://github.com/mnrkbys/vss_carver
 ```
 
-## Limitations
+## Installation of dependencies
 
-vss_carver.py only supports raw disk images. Therefore, E01, VMDK, VHDX and other disk images are needed to convert into a raw disk image or to mount as a raw disk image with libewf, libvmdk and so on.
+### Windows
+
+[Yogesh](https://github.com/ydkhatri) is offering pre-compiled pyewf and pyvmdk in his [mac_apt](https://github.com/ydkhatri/mac_apt) repository. So, you don't have to compile them by yourself.
+Follow [the instructions to install dependencies](https://github.com/ydkhatri/mac_apt/wiki/Installation-for-Python3.7#Windows).
+
+Of course, you can build them by yourself as same as Linux or macOS.
+
+### Linux and macOS
+
+Follow the instructions to build [libewf](https://github.com/libyal/libewf/wiki/Building) and [libvmdk](https://github.com/libyal/libvmdk/wiki/Building).
 
 ## Author
 

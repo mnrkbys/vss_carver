@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
-
 #
 # vss_carver.py
 # Carves and recreates VSS catalog and store from Windows disk image.
@@ -19,10 +17,15 @@ import binascii
 import uuid
 import copy
 import datetime
+import pyewf
+import pyvmdk
+import io
 from ctypes import *
 from calendar import timegm
 
+__VERSION__ = '20200306'
 vss_identifier = b'\x6B\x87\x08\x38\x76\xC1\x48\x4E\xB7\xAE\x04\x04\x6E\x6C\xC7\x52'
+
 
 class VolumeHeader(LittleEndianStructure):
     _fields_ = (
@@ -183,6 +186,10 @@ class StoreBlockChunk(object):
         self.list_next_block_offset.append(store_block.next_block_offset)
 
 
+def readinto_ctypes_struct(disk_image, struct_obj):
+    data = disk_image.read(sizeof(struct_obj))
+    return io.BytesIO(data).readinto(struct_obj)
+
 def check_vss_enable(disk_image, image_offset):
     volume_header = VolumeHeader()
 
@@ -194,7 +201,7 @@ def check_vss_enable(disk_image, image_offset):
     print("Volume size: {0}".format(hex(volume_size)))
 
     disk_image.seek(image_offset + 0x1e00)
-    disk_image.readinto(volume_header)
+    readinto_ctypes_struct(disk_image, volume_header)
     if volume_header.vssid == vss_identifier:
         print("Found VSS volume header.")
         print("{0}: {1}".format(hex(0x1e00), binascii.b2a_hex(volume_header.vssid)))
@@ -215,7 +222,7 @@ def read_catalog_from_disk_image(disk_image, volume_offset, catalog_offset):
     while True:
         catalog_block_offset = 0
         disk_image.seek(volume_offset + catalog_offset)
-        disk_image.readinto(catalog_block_header)
+        readinto_ctypes_struct(disk_image, catalog_block_header)
         catalog_block_offset = catalog_block_offset + 128
 
         while catalog_block_offset < 0x4000 - 128:
@@ -223,7 +230,7 @@ def read_catalog_from_disk_image(disk_image, volume_offset, catalog_offset):
             disk_image.seek(-8, 1)
 
             if catalog_entry_type == 0x2:
-                disk_image.readinto(catalog0x02)
+                readinto_ctypes_struct(disk_image, catalog0x02)
                 guid = struct.unpack("16s", catalog0x02.store_guid)[0]
                 if guid in dict_disk_catalog_entry:
                     dict_disk_catalog_entry[guid] = copy.deepcopy(catalog0x02)
@@ -234,7 +241,7 @@ def read_catalog_from_disk_image(disk_image, volume_offset, catalog_offset):
                     list_disk_catalog_entry.append(copy.deepcopy(['', '']))
                     list_disk_catalog_entry[index_disk_catalog_entry][0] = copy.deepcopy(catalog0x02)
             elif catalog_entry_type == 0x3:
-                disk_image.readinto(catalog0x03)
+                readinto_ctypes_struct(disk_image, catalog0x03)
                 guid = struct.unpack("16s", catalog0x03.store_guid)[0]
                 if guid in dict_disk_catalog_entry:
                     dict_disk_catalog_entry[guid][1] = copy.deepcopy(catalog0x03)
@@ -272,7 +279,7 @@ def carve_data_block(disk_image, image_offset, volume_size, debug):
         print("Searching store block chunks.")
 
     print("Started at {0}".format(before_time.strftime("%Y/%m/%d %H:%M:%S")))
-    while disk_image.readinto(store_block_header) and ((image_offset - base_offset) < volume_size):
+    while readinto_ctypes_struct(disk_image, store_block_header) and ((image_offset - base_offset) < volume_size):
         current_time = datetime.datetime.now()
         if (current_time - before_time).seconds >= 3:
             before_time = current_time
@@ -483,7 +490,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Header
         disk_image.seek(disk_catalog_entry[1].store_header_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         next_block_offset = store_block.next_block_offset
@@ -498,7 +505,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
 
         while next_block_offset > 0x0:
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             next_block_offset = store_block.next_block_offset
@@ -511,7 +518,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Block List
         disk_image.seek(disk_catalog_entry[1].store_block_list_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         next_block_offset = store_block.next_block_offset
@@ -526,7 +533,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
 
         while next_block_offset > 0x0:
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             next_block_offset = store_block.next_block_offset
@@ -539,7 +546,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Block Range
         disk_image.seek(disk_catalog_entry[1].store_block_range_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         next_block_offset = store_block.next_block_offset
@@ -554,7 +561,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
 
         while next_block_offset > 0x0:
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             next_block_offset = store_block.next_block_offset
@@ -567,7 +574,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Current Bitmap
         disk_image.seek(disk_catalog_entry[1].store_current_bitmap_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         next_block_offset = store_block.next_block_offset
@@ -582,7 +589,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
 
         while next_block_offset > 0x0:
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             next_block_offset = store_block.next_block_offset
@@ -596,7 +603,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         # Store Previous Bitmap
         if disk_catalog_entry[1].store_previous_bitmap_offset != 0x0:  # この if 文をカービングしたストアにも入れる
             disk_image.seek(disk_catalog_entry[1].store_previous_bitmap_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             next_block_offset = store_block.next_block_offset
@@ -611,7 +618,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
 
             while next_block_offset > 0x0:
                 disk_image.seek(next_block_offset + image_offset)
-                disk_image.readinto(store_block)
+                readinto_ctypes_struct(disk_image, store_block)
                 store_block.relative_block_offset = store_file_offset
                 store_block.current_block_offset = store_file_offset
                 next_block_offset = store_block.next_block_offset
@@ -631,7 +638,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Header
         disk_image.seek(snapshot_set['header'].head.current_block_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         if snapshot_set['header'].head.next_block_offset != 0x0:
@@ -646,7 +653,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
             if next_block_offset == 0x0:
                 break
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             if dict_store_block[next_block_offset].next_block_offset != 0 and store_block.next_block_offset != 0x0:
@@ -657,7 +664,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Block List
         disk_image.seek(snapshot_set['block'].head.current_block_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         if snapshot_set['block'].head.next_block_offset != 0x0:
@@ -675,7 +682,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
                 else:
                     if not dict_store_block[next_block_offset].flag_dummy:
                         disk_image.seek(next_block_offset + image_offset)
-                        disk_image.readinto(store_block)
+                        readinto_ctypes_struct(disk_image, store_block)
                     else:
                         original_data_block_offset = b'\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF'
                         relative_store_data_block_offset = b'\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF'
@@ -694,7 +701,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Range
         disk_image.seek(snapshot_set['range'].head.current_block_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         if snapshot_set['range'].head.next_block_offset != 0x0:
@@ -709,7 +716,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
             if next_block_offset == 0x0:
                 break
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             if dict_store_block[next_block_offset].next_block_offset != 0 and store_block.next_block_offset != 0x0:
@@ -720,7 +727,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         #
         # Store Current Bitmap
         disk_image.seek(snapshot_set['cur_bitmap'].head.current_block_offset + image_offset)
-        disk_image.readinto(store_block)
+        readinto_ctypes_struct(disk_image, store_block)
         store_block.relative_block_offset = store_file_offset
         store_block.current_block_offset = store_file_offset
         if snapshot_set['cur_bitmap'].head.next_block_offset != 0x0:
@@ -735,7 +742,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
             if next_block_offset == 0x0:
                 break
             disk_image.seek(next_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             if dict_store_block[next_block_offset].next_block_offset != 0 and store_block.next_block_offset != 0x0:
@@ -747,7 +754,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
         # Store Previous Bitmap
         if snapshot_set['prev_bitmap'].head.current_block_offset != 0x0:
             disk_image.seek(snapshot_set['prev_bitmap'].head.current_block_offset + image_offset)
-            disk_image.readinto(store_block)
+            readinto_ctypes_struct(disk_image, store_block)
             store_block.relative_block_offset = store_file_offset
             store_block.current_block_offset = store_file_offset
             if snapshot_set['prev_bitmap'].head.next_block_offset != 0x0:
@@ -762,7 +769,7 @@ def write_store(store_file, list_disk_catalog_entry, dict_store_block, list_snap
                 if next_block_offset == 0x0:
                     break
                 disk_image.seek(next_block_offset + image_offset)
-                disk_image.readinto(store_block)
+                readinto_ctypes_struct(disk_image, store_block)
                 store_block.relative_block_offset = store_file_offset
                 store_block.current_block_offset = store_file_offset
                 # 他の箇所も下の行と同様に直す
@@ -855,7 +862,9 @@ def write_catalog(catalog_file, list_disk_catalog_entry, list_snapshot_set, cata
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Carve and rebuild VSS snapshot catalog and store from disk image.")
+    parser = argparse.ArgumentParser(prog='vss_carver', description="Carve and rebuild VSS snapshot catalog and store from disk image.")
+    parser.add_argument('-t', '--disktype', action='store', type=str,
+                        help='specify a disk type: E01, VMDK, RAW')
     parser.add_argument('-o', '--offset', action='store', type=int,
                         help='offset to start of volume in disk image.')
     parser.add_argument('-i', '--image', action='store', type=str,
@@ -868,13 +877,27 @@ def main():
                         help='enabling to overwrite a catalog file and a store file (default: False)')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='debug mode if this flag is set (default: False)')
+    parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__VERSION__))
     args = parser.parse_args()
 
-    if None in (args.image, args.offset, args.catalog, args.store):
+    print('vss_carver {}'.format(__VERSION__))
+
+    if None in (args.disktype, args.image, args.offset, args.catalog, args.store):
         exit("too few arguments.")
 
     if os.path.exists(os.path.abspath(args.image)):
-        disk_image = open(args.image, "rb")
+        if args.disktype.upper() == 'E01':
+            disk_filename = pyewf.glob(args.image)
+            disk_image = pyewf.handle()
+            disk_image.open(disk_filename)
+        elif args.disktype.upper() == 'VMDK':
+            disk_image = pyvmdk.handle()
+            disk_image.open(args.image)
+            disk_image.open_extent_data_files()
+        elif args.disktype.upper() == 'RAW':
+            disk_image = open(args.image, "rb")
+        else:
+            exit("{} is not supported disk type.")
     else:
         exit("{0} does not exist.".format(args.image))
 
@@ -923,6 +946,10 @@ def main():
 
     disk_image.close()
 
+    return 0
 
 if __name__ == "__main__":
-    main()
+    if sys.version_info[0:2] >= (3, 7):
+        sys.exit(main())
+    else:
+        sys.exit("This script needs greater than or equal to Python 3.7")

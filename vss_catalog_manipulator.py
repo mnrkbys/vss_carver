@@ -3,7 +3,7 @@
 # vss_catalog_manipulator.py
 # Manipulates VSS catalog file that recreated by vss_carver.py.
 #
-# Copyright (C) 2018 Minoru Kobayashi <unknownbit@gmail.com> (@unkn0wnbit)
+# Copyright (C) 2018-2020 Minoru Kobayashi <unknownbit@gmail.com> (@unkn0wnbit)
 #
 # This software is released under the MIT License.
 # https://opensource.org/licenses/MIT
@@ -16,6 +16,7 @@ import datetime
 import uuid
 from ctypes import *
 
+__VERSION__ = '20200312'
 vss_identifier = b'\x6B\x87\x08\x38\x76\xC1\x48\x4E\xB7\xAE\x04\x04\x6E\x6C\xC7\x52'
 
 
@@ -322,6 +323,7 @@ def disable_entry(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Manipulate VSS snapshot catalog file. This tool expects output of vss_carver.py.")
+    parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__VERSION__))
     subparsers = parser.add_subparsers(help='sub-command help', title='subcommands')
     # parser.add_argument('--debug', action='store_true', default=False,
     #                     help='debug mode if this flag is set (default: False)')
@@ -375,6 +377,7 @@ def main():
     # parser_disable.set_defaults(func=disable_entry)
 
     args = parser.parse_args()
+    print('vss_carver {}'.format(__VERSION__))
     if hasattr(args, 'func'):
         args.func(args)
     else:

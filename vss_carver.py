@@ -3,7 +3,7 @@
 # vss_carver.py
 # Carves and recreates VSS catalog and store from Windows disk image.
 #
-# Copyright (c) 2018 Minoru Kobayashi <unknownbit@gmail.com> (@unkn0wnbit)
+# Copyright (C) 2018-2020 Minoru Kobayashi <unknownbit@gmail.com> (@unkn0wnbit)
 #
 # This software is released under the MIT License.
 # https://opensource.org/licenses/MIT
@@ -23,7 +23,7 @@ import io
 from ctypes import *
 from calendar import timegm
 
-__VERSION__ = '20200306'
+__VERSION__ = '20200312'
 vss_identifier = b'\x6B\x87\x08\x38\x76\xC1\x48\x4E\xB7\xAE\x04\x04\x6E\x6C\xC7\x52'
 
 
@@ -864,19 +864,19 @@ def write_catalog(catalog_file, list_disk_catalog_entry, list_snapshot_set, cata
 def main():
     parser = argparse.ArgumentParser(prog='vss_carver', description="Carve and rebuild VSS snapshot catalog and store from disk image.")
     parser.add_argument('-t', '--disktype', action='store', type=str,
-                        help='specify a disk type: E01, VMDK, RAW')
+                        help='Specify a disk type: E01, VMDK, RAW')
     parser.add_argument('-o', '--offset', action='store', type=int,
-                        help='offset to start of volume in disk image.')
+                        help='A start offset of volume in disk image.')
     parser.add_argument('-i', '--image', action='store', type=str,
-                        help='path to disk image.')
+                        help='Specify a disk image to analyze.')
     parser.add_argument('-c', '--catalog', type=str,
-                        help='path to catalog file.')
+                        help='Specify a catalog file.')
     parser.add_argument('-s', '--store', type=str,
-                        help='path to store file.')
+                        help='Specify a store file.')
     parser.add_argument('-f', '--force', action='store_true', default=False,
-                        help='enabling to overwrite a catalog file and a store file (default: False)')
+                        help='Enable to overwrite a catalog file and a store file (default: False)')
     parser.add_argument('--debug', action='store_true', default=False,
-                        help='debug mode if this flag is set (default: False)')
+                        help='Debug mode if this flag is set (default: False)')
     parser.add_argument('--version', action='version', version='%(prog)s {}'.format(__VERSION__))
     args = parser.parse_args()
 
@@ -887,9 +887,9 @@ def main():
 
     if os.path.exists(os.path.abspath(args.image)):
         if args.disktype.upper() == 'E01':
-            disk_filename = pyewf.glob(args.image)
+            disk_filenames = pyewf.glob(args.image)
             disk_image = pyewf.handle()
-            disk_image.open(disk_filename)
+            disk_image.open(disk_filenames)
         elif args.disktype.upper() == 'VMDK':
             disk_image = pyvmdk.handle()
             disk_image.open(args.image)
@@ -897,7 +897,7 @@ def main():
         elif args.disktype.upper() == 'RAW':
             disk_image = open(args.image, "rb")
         else:
-            exit("{} is not supported disk type.")
+            exit("{} is not supported disk type.".format(args.disktype))
     else:
         exit("{0} does not exist.".format(args.image))
 

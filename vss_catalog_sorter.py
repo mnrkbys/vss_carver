@@ -10,7 +10,6 @@
 #
 
 import argparse
-import binascii
 import copy
 import datetime
 import io
@@ -238,7 +237,9 @@ class MftEntryHeader(LittleEndianStructure):
         print("MFT entry index and sequence number:")
         print("\tMFT entry index: 0x{:x}".format(self.index))
         print("\tSequence number: 0x{:x}".format(self.sequence_number))
-
+        print("Base record file reference:")
+        print("\tMFT entry index: 0x{:x}".format(self.base_record_file_reference.mft_entry_index))
+        print("\tSequence number: 0x{:x}".format(self.base_record_file_reference.sequence_number))
 
 class NonResidentFlag(IntFlag):
     RESIDENT_FORM    = 0x0
@@ -295,9 +296,10 @@ class StandardInformationAttribute(LittleEndianStructure):
         print("Create: {}".format(filetime_timestamp(self.creation_timestamp)))
         print("Modify: {}".format(filetime_timestamp(self.modification_timestamp)))
         # Sometimes, an error is occurred. Commented out temporally.
-        # print("0x{:x}".format(self.mft_entry_modification_timestamp))
-        # print("MFT Modify: {}".format(filetime_timestamp(self.mft_entry_modification_timestamp)))
+        print("MFT Modify (hex): 0x{:x}".format(self.mft_entry_modification_timestamp))
+        print("MFT Modify: {}".format(filetime_timestamp(self.mft_entry_modification_timestamp)))
         print("Access: {}".format(filetime_timestamp(self.access_timestamp)))
+        print("Update Sequence Number: 0x{:x}".format(self.update_sequence_number))
 
 
 class NameSpace(IntEnum):
@@ -353,6 +355,14 @@ class BaseFileDirElement(LittleEndianStructure):
         self.mft_entry_header.print()
         self.standard_information_attribute.print()
         self.file_name_attribute.print()
+
+
+class BaseFileDirCollection(object):
+    def __init__(self, mft, base_file_directories, base_file_records, found_all_records):
+        self.mft = mft
+        self.base_file_directories = base_file_directories
+        self.base_file_records = base_file_records
+        self.found_all_records = found_all_records
 
 
 def dbg_print(msg):
@@ -554,61 +564,47 @@ def check_base_file_directories(base_file_directories):
 
     dir_depth = 0
     for name_string, base_file_dir_elements in base_file_directories.items():
-        latest_sequence_number = 0
+        latest_sequence_number = -1
         for base_file_dir_element in base_file_dir_elements:
             if dir_depth == 0:
                 # MFT entry index of root directory = 5
                 if name_string == '.' and base_file_dir_element.mft_entry_header.index == 5:
-                    if base_file_dir_element.mft_entry_header.sequence_number >= latest_sequence_number:
+                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
                         base_file_dir_element_with_latest_sequence_number[name_string] = base_file_dir_element
                         latest_sequence_number = base_file_dir_element.mft_entry_header.sequence_number
-                        print("*" * 50)
-                        print("name_string: {}".format(name_string))
-                        print("dir_depth: {}".format(dir_depth))
-                        print("MFT Entry Header:")
-                        print("\tBase record file reference:")
-                        print("\t\tMFT entry index: 0x{:x}".format(base_file_dir_element.mft_entry_header.index))
-                        print("\t\tSequence number: 0x{:x}".format(base_file_dir_element.mft_entry_header.sequence_number))
-                        print("File Name Attribute")
-                        print("\tParent file reference:")
-                        print("\t\tMFT entry index: 0x{:x}".format(base_file_dir_element.file_name_attribute.parent_file_reference.mft_entry_index))
-                        print("\t\tSequence number: 0x{:x}".format(base_file_dir_element.file_name_attribute.parent_file_reference.sequence_number))
+                        if debug:
+                            print("*" * 50)
+                            print("name_string: {}".format(name_string))
+                            print("dir_depth: {}".format(dir_depth))
+                            base_file_dir_element.print()
 
             elif dir_depth >= 1:
                 parent_dir = list(base_file_directories.keys())[dir_depth-1]
                 parent_mft_entry_index = base_file_dir_element_with_latest_sequence_number[parent_dir].mft_entry_header.index
-                print("parent_mft_entry_index: 0x{:x}".format(parent_mft_entry_index))
-                print("name_string: {}".format(name_string))
                 if base_file_dir_element.file_name_attribute.parent_file_reference.mft_entry_index == parent_mft_entry_index:
-                    latest_sequence_number = base_file_dir_element_with_latest_sequence_number[parent_dir].mft_entry_header.sequence_number
-                    if base_file_dir_element.mft_entry_header.sequence_number >= latest_sequence_number:
+                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
                         base_file_dir_element_with_latest_sequence_number[name_string] = base_file_dir_element
                         latest_sequence_number = base_file_dir_element.mft_entry_header.sequence_number
-                        print("*" * 50)
-                        print("name_string: {}".format(name_string))
-                        print("dir_depth: {}".format(dir_depth))
-                        print("MFT Entry Header:")
-                        print("\tBase record file reference:")
-                        print("\t\tMFT entry index: 0x{:x}".format(base_file_dir_element.mft_entry_header.index))
-                        print("\t\tSequence number: 0x{:x}".format(base_file_dir_element.mft_entry_header.sequence_number))
-                        print("File Name Attribute")
-                        print("\tParent file reference:")
-                        print("\t\tMFT entry index: 0x{:x}".format(base_file_dir_element.file_name_attribute.parent_file_reference.mft_entry_index))
-                        print("\t\tSequence number: 0x{:x}".format(base_file_dir_element.file_name_attribute.parent_file_reference.sequence_number))
+                        if debug:
+                            print("*" * 50)
+                            print("name_string: {}".format(name_string))
+                            print("dir_depth: {}".format(dir_depth))
+                            base_file_dir_element.print()
 
-        if base_file_dir_element_with_latest_sequence_number[name_string].mft_entry_header != None:
+        if base_file_dir_element_with_latest_sequence_number[name_string].mft_entry_header is not None:
             dir_depth += 1
 
-        # print("Current dir_depth: {}".format(dir_depth))
-
+    dbg_print("dir_depth: {}".format(dir_depth))
+    dbg_print("len(base_file_directories): {}".format(len(base_file_directories)))
     if dir_depth == len(base_file_directories):
-        return True
+        return True, base_file_dir_element_with_latest_sequence_number
     else:
-        return False
+        return False, base_file_dir_element_with_latest_sequence_number
 
 
-# def parse_mft_record(store_data_block_data, base_file_directories):
-def parse_mft_record(store_data_block_data, base_file):
+def analyze_mft_record(store_data_block_data, base_file_directories):
+    base_file = list(base_file_directories.keys())[-1]
+
     # try:
     mft_entry_header = MftEntryHeader()
     io.BytesIO(store_data_block_data).readinto(mft_entry_header)
@@ -643,21 +639,19 @@ def parse_mft_record(store_data_block_data, base_file):
 
                         name_string = struct.unpack_from("<{}s".format(file_name_attribute.name_string_size*2), bytes(file_name_attribute.name_string[:file_name_attribute.name_string_size*2]))[0].decode(encoding='utf-16')
 
-                        if name_string == base_file:
-                            # MACB timestamps of $FILE_NAME are not updated, so use the modification timestamp of $STANDARD_INFORMATION instead of it.
-                            yield standard_information_attribute.modification_timestamp
-
-                        # if mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IS_DIRECTORY:
-                        #     if name_string in list(base_file_directories.keys())[:-1]:
-                        #         # base_file_directories[name_string].append(file_name_attribute)
-                        #         base_file_directories[name_string].append(BaseFileDirElement(mft_entry_header, standard_information_attribute, file_name_attribute))
-                        # else:
-                        #     if name_string == list(base_file_directories.keys())[-1]:
-                        #         # base_file_directories[name_string].append(file_name_attribute)
-                        #         base_file_directories[name_string].append(BaseFileDirElement(mft_entry_header, standard_information_attribute, file_name_attribute))
+                        if mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IS_DIRECTORY:
+                            if name_string in list(base_file_directories.keys())[:-1]:
+                                base_file_directories[name_string].append(BaseFileDirElement(mft_entry_header, standard_information_attribute, file_name_attribute))
+                        else:
+                            if name_string == list(base_file_directories.keys())[-1]:
+                                base_file_directories[name_string].append(BaseFileDirElement(mft_entry_header, standard_information_attribute, file_name_attribute))
                         # print(base_file_directories)
                         # if check_base_file_directories(base_file_directories):
                         #     yield standard_information_attribute.modification_timestamp
+
+                        if name_string == base_file:
+                            # MACB timestamps of $FILE_NAME are not updated, so use the modification timestamp of $STANDARD_INFORMATION instead of it.
+                            yield standard_information_attribute.modification_timestamp
 
                     elif mft_attribute_header.attribute_type == AttributeTypes.DATA:
                         dbg_print("$DATA")
@@ -699,10 +693,12 @@ def main():
                         help='Specify a catalog file.')
     parser.add_argument('-s', '--store', type=str,
                         help='Specify a store file.')
-    # parser.add_argument('-b', '--basefile', type=str, default='/Windows/System32/winevt/Logs/System.evtx',
-    #                     help='Specify the file on which to base the sorting (default: /Windows/System32/winevt/Logs/System.evtx)')
-    parser.add_argument('-b', '--basefile', type=str, default='System.evtx',
-                        help='Specify the file on which to base the sorting (default: System.evtx)')
+    parser.add_argument('-m', '--mft', type=str,
+                        help='Specify an exported $MFT file.')
+    parser.add_argument('-b', '--basefile', type=str, default='/Windows/System32/winevt/Logs/System.evtx',
+                        help='Specify the file on which to base the sorting (default: /Windows/System32/winevt/Logs/System.evtx)')
+    # parser.add_argument('-b', '--basefile', type=str, default='System.evtx',
+    #                     help='Specify the file on which to base the sorting (default: System.evtx)')
     parser.add_argument('-f', '--force', action='store_true', default=False,
                         help='Enable to overwrite a catalog file and a store file (default: False)')
     parser.add_argument('--debug', action='store_true', default=False,
@@ -740,16 +736,21 @@ def main():
     if not os.path.exists(os.path.abspath(args.store)):
         exit("{} does not exist.".format(args.store))
 
+    if args.mft and not os.path.exists(os.path.abspath(args.mft)):
+        exit("{} does not exist.".format(args.mft))
+
     sorted_catalog = args.catalog + '_sorted'
     if not args.force and os.path.exists(os.path.abspath(sorted_catalog)):
         exit("{} already exists.".format(sorted_catalog))
 
-    # if args.basefile[0] not in ('\\', '/'):
-    #     exit('"--basefile" opstion should be started with "\\" or "/".')
+    if args.basefile[0] not in ('\\', '/'):
+        exit('"--basefile" opstion should be started with "\\" or "/".')
 
     f_catalog = open(args.catalog, 'rb')
     f_store = open(args.store, 'rb')
     f_sorted_catalog = open(sorted_catalog, 'wb')
+    if args.mft:
+        f_mft = open(args.mft, 'rb')
 
     list_catalog_entry = read_catalog(f_catalog)
     print("Loaded catalog list:")
@@ -758,11 +759,41 @@ def main():
     # for operating_machine_string, service_machine_string in get_machine_string(list_catalog_entry, f_store):
     #     print("Operating machine: {}, Service machine: {}".format(operating_machine_string, service_machine_string))
 
+    base_file_directories_collections = []
+
+    if f_mft:
+        base_file_directories_mft = parse_basefile_path(args.basefile)
+        print("=" * 60)
+        print("Analyzing $MFT...")
+        mft_record = f_mft.read(1024)
+        while mft_record != b'':
+            for _ in analyze_mft_record(mft_record, base_file_directories_mft):
+                pass
+            mft_record = f_mft.read(1024)
+
+        result, base_file_records = check_base_file_directories(base_file_directories_mft)
+        if result:
+            print("Found base file entry: {}".format(args.basefile))
+        else:
+            print("Could not found base file entry: {}".format(args.basefile))
+
+        base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, result))
+
+    else:
+        base_file_directories_mft = parse_basefile_path(args.basefile)
+        base_file_records = {}
+        for name_string in base_file_directories_mft.keys():
+            base_file_records[name_string] = BaseFileDirElement(None, None, None)
+        base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, False))
+
     # processed_physical_data_offset = {}
     timestamp_candidates = {}
     for catalog_entry in list_catalog_entry:
-        # base_file_directories = parse_basefile_path(args.basefile)
-        dbg_print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
+        base_file_directories = parse_basefile_path(args.basefile)
+        # dbg_print("~*~" * 20)
+        # dbg_print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
+        print("+" * 60)
+        print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
         for physical_data_offset, store_data_block_data in get_store_data_block_data(catalog_entry, f_store, disk_image, args.offset):
             # if physical_data_offset not in processed_physical_data_offset.keys():
             #     processed_physical_data_offset[physical_data_offset] = 1
@@ -771,9 +802,91 @@ def main():
 
             dbg_print("=" * 50)
             dbg_print("MFT record offset of base file: 0x{:x}".format(physical_data_offset))
-            # for timestamp in parse_mft_record(store_data_block_data, base_file_directories):
-            for timestamp in parse_mft_record(store_data_block_data, args.basefile):
+            for timestamp in analyze_mft_record(store_data_block_data, base_file_directories):
+            # for timestamp in analyze_mft_record(store_data_block_data, args.basefile):
                 timestamp_candidates[timestamp] = catalog_entry
+
+        # for path, base_file_dir_elements in base_file_directories.items():
+        #     for base_file_dir_element in base_file_dir_elements:
+        #         print("---" * 20)
+        #         base_file_dir_element.print()
+
+        result, base_file_records = check_base_file_directories(base_file_directories)
+        if result:
+            print("Found base file entry: {}".format(args.basefile))
+        else:
+            print("Could not found base file entry: {}".format(args.basefile))
+
+        base_file_directories_collections.append(BaseFileDirCollection(False, base_file_directories, base_file_records, result))
+
+    # debug = True
+    collection_num = 0
+    for base_file_directories_collection in base_file_directories_collections:
+        lacking_path = []
+        if not base_file_directories_collection.mft and not base_file_directories_collection.found_all_records:
+            for name_string, base_file_dir_element in base_file_directories_collection.base_file_records.items():
+                # print("base_file_dir_element:")
+                # base_file_dir_element.print()
+                if base_file_dir_element.mft_entry_header is None:
+                    # count = collection_num - 1
+                    # while count >= 0:
+                    #     temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
+                    #     temp_directories[name_string] = base_file_directories_collections[count].base_file_directories[name_string]
+                    #     for name, elements in temp_directories.items():
+                    #         print("#" * 60)
+                    #         print("Name: {}".format(name))
+                    #         for element in elements:
+                    #             element.print()
+                    #     result, base_file_records = check_base_file_directories(temp_directories)
+                    #     if result:
+                    #         base_file_directories_collection.base_file_records = base_file_records
+                    #         break
+                    #     else:
+                    #         count -= 1
+                    lacking_path.append(name_string)
+
+                print("collection_num: {}".format(collection_num))
+                print("lacking_path: {}\n".format(lacking_path))
+
+            result = False
+            temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
+            for path in lacking_path:
+                # temp_directories = None
+                prev_num = collection_num - 1
+                while prev_num >= 0:
+                    if base_file_directories_collections[prev_num].base_file_directories[path] is not None:
+                        temp_directories[path] = base_file_directories_collections[prev_num].base_file_directories[path]
+
+                        result, base_file_records = check_base_file_directories(temp_directories)
+                        print("*" * 60)
+                        print("result: {}".format(result))
+                        if result:
+                            base_file_directories_collection.base_file_records = base_file_records
+                            # print("Fixed base_file_records: {}".format(base_file_directories_collection.base_file_records))
+                            print("Fixed base_file_records:")
+                            for path, element in base_file_directories_collection.base_file_records.items():
+                                print("path: {}".format(path))
+                                element.print()
+                                print("\n")
+
+                            break
+
+                    prev_num -= 1
+
+                if result:
+                    break
+
+                # if temp_directories:
+                #     result, base_file_records = check_base_file_directories(temp_directories)
+                #     print("*" * 60)
+                #     print("result: {}".format(result))
+
+                #     # base_file_records[path].print()
+                #     if result:
+                #         base_file_directories_collection.base_file_records = base_file_records
+                #         print("Fixed base_file_records: {}".format(base_file_directories_collection.base_file_records))
+
+        collection_num += 1
 
     if debug:
         print("~" * 50)
@@ -791,6 +904,8 @@ def main():
     f_catalog.close()
     f_sorted_catalog.close()
     disk_image.close()
+    if f_mft:
+        f_mft.close()
 
 
 if __name__ == "__main__":

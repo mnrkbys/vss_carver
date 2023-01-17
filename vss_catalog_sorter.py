@@ -25,7 +25,7 @@ from enum import IntEnum, IntFlag
 import pyewf
 import pyvmdk
 
-__VERSION__ = '20221124'
+__VERSION__ = '20230117'
 vss_identifier = b'\x6B\x87\x08\x38\x76\xC1\x48\x4E\xB7\xAE\x04\x04\x6E\x6C\xC7\x52'
 
 debug = False
@@ -352,9 +352,10 @@ class BaseFileDirElement(LittleEndianStructure):
         self.file_name_attribute = file_name_attribute
 
     def print(self):
-        self.mft_entry_header.print()
-        self.standard_information_attribute.print()
-        self.file_name_attribute.print()
+        if self.mft_entry_header and self.standard_information_attribute and self.file_name_attribute:
+            self.mft_entry_header.print()
+            self.standard_information_attribute.print()
+            self.file_name_attribute.print()
 
 
 class BaseFileDirCollection(object):
@@ -527,7 +528,7 @@ def get_store_data_block_data(catalog_entry, f_store, f_disk_image, vol_offset):
                 data_offset = 0
                 while data_offset < 0x4000:
                     if store_data_block_data[data_offset:data_offset+4] == b'FILE':
-                        # 4K bytes MFT record should be supported.
+                        # TODO: Support 4K bytes MFT record
                         yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, store_data_block_data[data_offset:data_offset+1024]
                     data_offset += 1024
 
@@ -547,7 +548,7 @@ def parse_basefile_path(base_file_path):
     elif os.name == 'posix':
         base_file_path = os.path.abspath(base_file_path.replace('\\', '/'))
     else:
-        exit("Unsupported platfom: {}".format(os.name))
+        exit("Unsupported platform: {}".format(os.name))
 
     for path in base_file_path.split('/'):
         if path == '':
@@ -557,10 +558,17 @@ def parse_basefile_path(base_file_path):
     return base_file_directories
 
 
-def check_base_file_directories(base_file_directories):
+# TODO: Also check Update Sequence Number and $LogFile Sequence Number
+# Reference: https://flatcap.github.io/linux-ntfs/ntfs/concepts/file_record.html
+# Reference: https://port139.hatenablog.com/entry/2018/02/03/105420
+# Reference: http://dubeyko.com/development/FileSystems/NTFS/ntfsdoc.pdf
+def check_base_file_directories(base_file_directories, max_depth=-1):
     base_file_dir_element_with_latest_sequence_number = {}
     for name_string in base_file_directories.keys():
         base_file_dir_element_with_latest_sequence_number[name_string] = BaseFileDirElement(None, None, None)
+
+    if max_depth == -1:
+        max_depth = len(base_file_directories.keys()) - 1
 
     dir_depth = 0
     for name_string, base_file_dir_elements in base_file_directories.items():
@@ -592,11 +600,19 @@ def check_base_file_directories(base_file_directories):
                             base_file_dir_element.print()
 
         if base_file_dir_element_with_latest_sequence_number[name_string].mft_entry_header is not None:
+            if dir_depth == max_depth:
+                break
             dir_depth += 1
+
+        else:
+            dbg_print("dir_depth: {}".format(dir_depth))
+            dbg_print("len(base_file_directories): {}".format(len(base_file_directories)))
+            return False, base_file_dir_element_with_latest_sequence_number
 
     dbg_print("dir_depth: {}".format(dir_depth))
     dbg_print("len(base_file_directories): {}".format(len(base_file_directories)))
-    if dir_depth == len(base_file_directories):
+    # if dir_depth == len(base_file_directories):
+    if dir_depth == max_depth:
         return True, base_file_dir_element_with_latest_sequence_number
     else:
         return False, base_file_dir_element_with_latest_sequence_number
@@ -678,11 +694,172 @@ def analyze_mft_record(store_data_block_data, base_file_directories):
     #     # exit
 
 
+def get_prev_timestamp(current_ts, ts_list):
+    prev = 0
+    for ts in ts_list:
+        if ts == current_ts:
+            return prev
+        prev = ts
+
+
+def get_prev_base_file_directories_collection(base_file_directories_collections, prev_ts):
+    if prev_ts == 0:
+        return base_file_directories_collections[0]
+
+    for base_file_directories_collection in base_file_directories_collections:
+        base_file_name = list(base_file_directories_collection.base_file_directories.keys())[-1]
+        for element in base_file_directories_collection.base_file_directories[base_file_name]:
+            if element.standard_information_attribute.modification_timestamp == prev_ts:
+                return base_file_directories_collection
+
+
+def repair_base_file_directories(timestamp_candidates: dict, base_file_directories_collections: list):
+    sorted_timestamp = sorted(timestamp_candidates.keys(), reverse=True)
+    # for base_file_directories_collection in base_file_directories_collections:
+    for collection_index, base_file_directories_collection in enumerate(base_file_directories_collections):
+        if not base_file_directories_collection.mft and not base_file_directories_collection.found_all_records:
+            base_file_name = list(base_file_directories_collection.base_file_directories.keys())[-1]
+            prev_ts = get_prev_timestamp(base_file_directories_collection.base_file_directories[base_file_name][0].standard_information_attribute.modification_timestamp, sorted_timestamp)
+            prev_base_file_directories_collection = get_prev_base_file_directories_collection(base_file_directories_collections, prev_ts)
+            temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
+            # print("=" * 50)
+            # print("BEFORE:")
+            # for path, elements in base_file_directories_collection.base_file_directories.items():
+            #     print(">" * 40)
+            #     print("path: {}".format(path))
+            #     for element in elements:
+            #         print("-" * 40)
+            #         element.print()
+
+            for path, element in base_file_directories_collection.base_file_records.items():
+                # print("*** path: {} ***".format(path))
+                if element.mft_entry_header is None:
+                    # Call check_base_file_directories() with original base_file_directories.
+                    # If base_file_directories is None, using previous ones.
+                    # print("Step1 temp_directories")
+                    # for i in temp_directories[path]:
+                    #     i.print()
+                    # print("Step1 temp_directories")
+
+                    # print("Step1 prev_base_file_directories_collection.base_file_directories")
+                    # for i in prev_base_file_directories_collection.base_file_directories[path]:
+                    #     i.print()
+                    # print("Step1 prev_base_file_directories_collection.base_file_directories")
+
+                    # if temp_directories[path] == []:
+                    #     temp_directories[path] = prev_base_file_directories_collection.base_file_directories[path]
+                    # print("Copied in step1")
+                    # print("=" * 50)
+                    # print("Step1 AFTER:")
+                    # for _path, _elements in temp_directories.items():
+                    #     print(">" * 40)
+                    #     print("_path: {}".format(_path))
+                    #     for _element in _elements:
+                    #         print("-" * 40)
+                    #         _element.print()
+
+                    # print("=" * 50)
+                    # print("Step1 CHECK:")
+                    # print("<" * 50)
+                    result, base_file_records = check_base_file_directories(temp_directories)
+                    # print("result: {}".format(result))
+                    # for _, record in base_file_records.items():
+                    #     print("-" * 50)
+                    #     record.print()
+
+                    if result:
+                        print("Repaired catalog No.{}".format(collection_index - 1))
+                        base_file_directories_collection.base_file_records = base_file_records
+                        # print("Fixed base_file_records:")
+                        # for _path, _element in base_file_directories_collection.base_file_records.items():
+                        #     print("_path: {}".format(_path))
+                        #     _element.print()
+                        #     print("\n")
+                        break
+                    # else:
+                    #     for p, e in base_file_records.items():
+                    #         if e.mft_entry_header is None:
+                    #             if p == path:
+                    #                 exit("Cannot determine the base file MFT entries.")
+
+                    # Call check_base_file_directories() with previous base_file_directories.
+                    # print("Step2 temp_directories")
+                    # for i in temp_directories[path]:
+                    #     i.print()
+                    # print("Step2 temp_directories")
+
+                    # print("Step2 prev_base_file_directories_collection.base_file_directories")
+                    # for i in prev_base_file_directories_collection.base_file_directories[path]:
+                    #     i.print()
+                    # print("Step2 prev_base_file_directories_collection.base_file_directories")
+
+                    # if temp_directories[path] != prev_base_file_directories_collection.base_file_directories[path]:
+                        # temp_directories[path] = prev_base_file_directories_collection.base_file_directories[path]
+                    temp_directories[path] = prev_base_file_directories_collection.base_file_directories[path]
+
+                    # print("Copied in step2")
+                    # print("=" * 50)
+                    # print("Step2 AFTER:")
+                    # for _path, _elements in temp_directories.items():
+                    #     print(">" * 40)
+                    #     print("_path: {}".format(_path))
+                    #     for _element in _elements:
+                    #         print("-" * 40)
+                    #         _element.print()
+
+                    # print("=" * 50)
+                    # print("Step2 CHECK:")
+                    # print("<" * 50)
+                    result, base_file_records = check_base_file_directories(temp_directories)
+                    # print("result: {}".format(result))
+                    # for _, record in base_file_records.items():
+                    #     print("-" * 50)
+                    #     record.print()
+
+                    if result:
+                        print("Repaired catalog No.{}".format(collection_index - 1))
+                        base_file_directories_collection.base_file_records = base_file_records
+                        # print("Fixed base_file_records:")
+                        # for _path, _element in base_file_directories_collection.base_file_records.items():
+                        #     print("_path: {}".format(_path))
+                        #     _element.print()
+                        #     print("\n")
+                        break
+
+                    # if path == base_file_name and not result:
+                    #     # print("*" * 50)
+                    #     # print("Cannot determine the base file MFT entries.")
+                    #     # for path, elements in temp_directories.items():
+                    #     #     print("path: {}".format(path))
+                    #     #     for element in elements:
+                    #     #         print("-" * 40)
+                    #     #         element.print()
+                    #     # exit()
+                    #     return False
+                    if not result:
+                        print("Could not repair catalog No.{}".format(collection_index - 1))
+                        for _path, _element in base_file_directories_collection.base_file_records.items():
+                            print("_path: {}".format(_path))
+                            _element.print()
+                            print()
+
+    return True
+
+
+def get_base_file_records_timeline(base_file_directories_collections):
+    timeline = []
+    for base_file_directories_collection in base_file_directories_collections:
+        base_file_name = list(base_file_directories_collection.base_file_directories.keys())[-1]
+        timeline.append(base_file_directories_collection.base_file_records[base_file_name].standard_information_attribute.modification_timestamp)
+
+    return sorted(timeline, reverse=True)[1:]  # remove timestamp of $MFT records
+
+
 def main():
     global debug
 
     # Parse arguments
-    parser = argparse.ArgumentParser(prog='vss_catalog_sorter', description="Carve and rebuild VSS snapshot catalog and store from disk image.")
+    parser = argparse.ArgumentParser(prog='vss_catalog_sorter', description="Guess and sort VSS snapshot catalog creation timestamps.")
     parser.add_argument('-t', '--disktype', action='store', type=str,
                         help='Specify a disk type: E01, VMDK, RAW')
     parser.add_argument('-o', '--offset', action='store', type=int,
@@ -709,7 +886,7 @@ def main():
     print('vss_catalog_sorter {}'.format(__VERSION__))
 
     # Check requirement of arguments
-    if None in (args.disktype, args.image, args.offset, args.catalog, args.store, args.basefile):
+    if None in (args.disktype, args.image, args.offset, args.catalog, args.store, args.mft, args.basefile):
         exit("too few arguments.")
 
     debug = args.debug
@@ -736,7 +913,7 @@ def main():
     if not os.path.exists(os.path.abspath(args.store)):
         exit("{} does not exist.".format(args.store))
 
-    if args.mft and not os.path.exists(os.path.abspath(args.mft)):
+    if not os.path.exists(os.path.abspath(args.mft)):
         exit("{} does not exist.".format(args.mft))
 
     sorted_catalog = args.catalog + '_sorted'
@@ -761,132 +938,111 @@ def main():
 
     base_file_directories_collections = []
 
-    if f_mft:
-        base_file_directories_mft = parse_basefile_path(args.basefile)
-        print("=" * 60)
-        print("Analyzing $MFT...")
+    # Find base file path MFT entries from $MFT
+    base_file_directories_mft = parse_basefile_path(args.basefile)
+    print("=" * 60)
+    print("Analyzing $MFT...")
+    # TODO: Support 4K bytes MFT record
+    mft_record = f_mft.read(1024)
+    while mft_record != b'':
+        for _ in analyze_mft_record(mft_record, base_file_directories_mft):
+            pass
         mft_record = f_mft.read(1024)
-        while mft_record != b'':
-            for _ in analyze_mft_record(mft_record, base_file_directories_mft):
-                pass
-            mft_record = f_mft.read(1024)
 
-        result, base_file_records = check_base_file_directories(base_file_directories_mft)
-        if result:
-            print("Found base file entry: {}".format(args.basefile))
-        else:
-            print("Could not found base file entry: {}".format(args.basefile))
-
-        base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, result))
-
+    result, base_file_records = check_base_file_directories(base_file_directories_mft)
+    if result:
+        print("Found base file entry: {}".format(args.basefile))
     else:
-        base_file_directories_mft = parse_basefile_path(args.basefile)
-        base_file_records = {}
-        for name_string in base_file_directories_mft.keys():
-            base_file_records[name_string] = BaseFileDirElement(None, None, None)
-        base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, False))
+        print("Could not found base file entry: {}".format(args.basefile))
+        exit()
 
-    # processed_physical_data_offset = {}
+    base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, result))
+
+    # Find base file path MFT entries in every VSS snapshot
+    print("=" * 60)
+    print("Analyzing MFT records in every VSS snapshot...")
     timestamp_candidates = {}
     for catalog_entry in list_catalog_entry:
         base_file_directories = parse_basefile_path(args.basefile)
         # dbg_print("~*~" * 20)
         # dbg_print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
-        print("+" * 60)
+        # print("+" * 60)
+        print("-" * 60)
         print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
         for physical_data_offset, store_data_block_data in get_store_data_block_data(catalog_entry, f_store, disk_image, args.offset):
-            # if physical_data_offset not in processed_physical_data_offset.keys():
-            #     processed_physical_data_offset[physical_data_offset] = 1
-            # else:
-            #     processed_physical_data_offset[physical_data_offset] += 1
-
             dbg_print("=" * 50)
             dbg_print("MFT record offset of base file: 0x{:x}".format(physical_data_offset))
             for timestamp in analyze_mft_record(store_data_block_data, base_file_directories):
-            # for timestamp in analyze_mft_record(store_data_block_data, args.basefile):
                 timestamp_candidates[timestamp] = catalog_entry
-
-        # for path, base_file_dir_elements in base_file_directories.items():
-        #     for base_file_dir_element in base_file_dir_elements:
-        #         print("---" * 20)
-        #         base_file_dir_element.print()
 
         result, base_file_records = check_base_file_directories(base_file_directories)
         if result:
             print("Found base file entry: {}".format(args.basefile))
         else:
             print("Could not found base file entry: {}".format(args.basefile))
+            # for path, element in base_file_records.items():
+            #     print("-" * 50)
+            #     print("Path: {}".format(path))
+            #     element.print()
 
         base_file_directories_collections.append(BaseFileDirCollection(False, base_file_directories, base_file_records, result))
 
-    # debug = True
-    collection_num = 0
-    for base_file_directories_collection in base_file_directories_collections:
-        lacking_path = []
-        if not base_file_directories_collection.mft and not base_file_directories_collection.found_all_records:
-            for name_string, base_file_dir_element in base_file_directories_collection.base_file_records.items():
-                # print("base_file_dir_element:")
-                # base_file_dir_element.print()
-                if base_file_dir_element.mft_entry_header is None:
-                    # count = collection_num - 1
-                    # while count >= 0:
-                    #     temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
-                    #     temp_directories[name_string] = base_file_directories_collections[count].base_file_directories[name_string]
-                    #     for name, elements in temp_directories.items():
-                    #         print("#" * 60)
-                    #         print("Name: {}".format(name))
-                    #         for element in elements:
-                    #             element.print()
-                    #     result, base_file_records = check_base_file_directories(temp_directories)
-                    #     if result:
-                    #         base_file_directories_collection.base_file_records = base_file_records
-                    #         break
-                    #     else:
-                    #         count -= 1
-                    lacking_path.append(name_string)
+    print("=" * 60)
+    if all([x.found_all_records for x in base_file_directories_collections]):
+        print("Every VSS snapshot has base file path MFT entries.")
+    else:
+        print("Trying to repair base file path MFT entries in VSS snapshots...")
+        result = repair_base_file_directories(timestamp_candidates, base_file_directories_collections)
+        if not result:
+            print("Could not build a base file path in every VSS snapshot.")
+            exit()
 
-                print("collection_num: {}".format(collection_num))
-                print("lacking_path: {}\n".format(lacking_path))
+# # 修正方針 (2022/11/29)
+# # base_file_directories_collections で保持している base_file_directories の key でループさせて、
+# # check_base_file_directories() を呼ぶ。
+# # result == False の場合、 max_depth を1ずつ増やす。
+# # result == True and max_depth == len(base_file_directories_collection.base_file_directories.keys()) の結果になった時にベースファイルのフルパスを補完できたとみなす。
 
-            result = False
-            temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
-            for path in lacking_path:
-                # temp_directories = None
-                prev_num = collection_num - 1
-                while prev_num >= 0:
-                    if base_file_directories_collections[prev_num].base_file_directories[path] is not None:
-                        temp_directories[path] = base_file_directories_collections[prev_num].base_file_directories[path]
+#     # debug = True
+#     collection_num = 0
+#     for base_file_directories_collection in base_file_directories_collections:
+#         lacking_path = []
+#         if not base_file_directories_collection.mft and not base_file_directories_collection.found_all_records:
+#             for name_string, base_file_dir_element in base_file_directories_collection.base_file_records.items():
+#                 if base_file_dir_element.mft_entry_header is None:
+#                     lacking_path.append(name_string)
 
-                        result, base_file_records = check_base_file_directories(temp_directories)
-                        print("*" * 60)
-                        print("result: {}".format(result))
-                        if result:
-                            base_file_directories_collection.base_file_records = base_file_records
-                            # print("Fixed base_file_records: {}".format(base_file_directories_collection.base_file_records))
-                            print("Fixed base_file_records:")
-                            for path, element in base_file_directories_collection.base_file_records.items():
-                                print("path: {}".format(path))
-                                element.print()
-                                print("\n")
+#             print("collection_num: {}".format(collection_num))
+#             print("lacking_path: {}\n".format(lacking_path))
 
-                            break
+#             result = False
+#             temp_directories = copy.deepcopy(base_file_directories_collection.base_file_directories)
+#             for path in lacking_path:
+#                 prev_num = collection_num - 1
+#                 while prev_num >= 0:
+#                     if base_file_directories_collections[prev_num].base_file_directories[path] is not None:
+#                         temp_directories[path] = base_file_directories_collections[prev_num].base_file_directories[path]
 
-                    prev_num -= 1
+#                         result, base_file_records = check_base_file_directories(temp_directories)
+#                         print("*" * 60)
+#                         print("result: {}".format(result))
+#                         if result:
+#                             base_file_directories_collection.base_file_records = base_file_records
+#                             # print("Fixed base_file_records: {}".format(base_file_directories_collection.base_file_records))
+#                             print("Fixed base_file_records:")
+#                             for path, element in base_file_directories_collection.base_file_records.items():
+#                                 print("path: {}".format(path))
+#                                 element.print()
+#                                 print("\n")
 
-                if result:
-                    break
+#                             break
 
-                # if temp_directories:
-                #     result, base_file_records = check_base_file_directories(temp_directories)
-                #     print("*" * 60)
-                #     print("result: {}".format(result))
+#                     prev_num -= 1
 
-                #     # base_file_records[path].print()
-                #     if result:
-                #         base_file_directories_collection.base_file_records = base_file_records
-                #         print("Fixed base_file_records: {}".format(base_file_directories_collection.base_file_records))
+#                 if result:
+#                     break
 
-        collection_num += 1
+#         collection_num += 1
 
     if debug:
         print("~" * 50)
@@ -894,9 +1050,16 @@ def main():
             print("Timestamp candidate: 0x{:x} ({})".format(ts, filetime_timestamp(ts)))
             print_entry([catalog_entry])
 
-    updated_list_catalog_entry = update_shadow_copy_creation_time(timestamp_candidates)
+    base_file_timeline = get_base_file_records_timeline(base_file_directories_collections)
+    new_shadow_copy_creation_timestamp = {}
+    for ts in base_file_timeline:
+        new_shadow_copy_creation_timestamp[ts] = timestamp_candidates[ts]
+
+    # updated_list_catalog_entry = update_shadow_copy_creation_time(timestamp_candidates)
+    updated_list_catalog_entry = update_shadow_copy_creation_time(new_shadow_copy_creation_timestamp)
     write_catalog(f_sorted_catalog, updated_list_catalog_entry)
-    print("-=" * 40)
+    # print("-=" * 40)
+    print("=" * 60)
     print("Sorted catalog list")
     print_entry(updated_list_catalog_entry)
 

@@ -232,6 +232,10 @@ class MftEntryHeader(LittleEndianStructure):
         ('index', c_uint32)  # MFT Entry ID (= inode)
     )
 
+    def __init__(self):
+        self.fixup = 0
+        self.number_of_fixup = 0
+
     def print(self):
         print("MFT Entry Header")
         print("MFT entry index and sequence number:")
@@ -240,6 +244,8 @@ class MftEntryHeader(LittleEndianStructure):
         print("Base record file reference:")
         print("\tMFT entry index: 0x{:x}".format(self.base_record_file_reference.mft_entry_index))
         print("\tSequence number: 0x{:x}".format(self.base_record_file_reference.sequence_number))
+        print("Update sequence")
+        print("\tUpdate sequence number: 0x{:x}".format(self.fixup))
 
 class NonResidentFlag(IntFlag):
     RESIDENT_FORM    = 0x0
@@ -526,11 +532,27 @@ def get_store_data_block_data(catalog_entry, f_store, f_disk_image, vol_offset):
                 # f_disk_image.seek(vol_offset + store_block_list_entry.original_data_block_offset)
                 store_data_block_data = f_disk_image.read(0x4000)
                 data_offset = 0
+                # TODO: Support 4K bytes MFT record
                 while data_offset < 0x4000:
-                    if store_data_block_data[data_offset:data_offset+4] == b'FILE':
-                        # TODO: Support 4K bytes MFT record
-                        yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, store_data_block_data[data_offset:data_offset+1024]
-                    data_offset += 1024
+                    # if store_data_block_data[data_offset:data_offset+4] == b'FILE':
+                    #     yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, store_data_block_data[data_offset:data_offset+1024]
+                    # data_offset += 1024
+                    mft_entry_header = MftEntryHeader()
+                    # tmp_record = store_data_block_data[data_offset:data_offset+1024]
+                    # io.BytesIO(tmp_record).readinto(mft_entry_header)
+                    io.BytesIO(store_data_block_data[data_offset:data_offset+1024]).readinto(mft_entry_header)
+                    if bytes(mft_entry_header.signature) == b'FILE' and mft_entry_header.entry_flags & (~0x000F & 0xFFFF) == 0 and mft_entry_header.total_entry_size in (1024, 4096):
+                        # mft_entry_header.print()
+                        # if mft_entry_header.total_entry_size == 1024:
+                        #     yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, tmp_record
+                        # elif mft_entry_header.total_entry_size == 4096:
+                        #     tmp_record = store_data_block_data[data_offset:data_offset+4096]
+                        #     yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, tmp_record
+                        yield vol_offset + store_block_list_entry.store_data_block_offset + data_offset, store_data_block_data[data_offset:data_offset+mft_entry_header.total_entry_size]
+                        data_offset += mft_entry_header.total_entry_size
+                    else:
+                        # data_offset += mft_entry_header.total_entry_size
+                        data_offset += 1024
 
                 store_data_block_offset += sizeof(StoreBlockListEntry)
 
@@ -573,13 +595,16 @@ def check_base_file_directories(base_file_directories, max_depth=-1):
     dir_depth = 0
     for name_string, base_file_dir_elements in base_file_directories.items():
         latest_sequence_number = -1
+        latest_update_sequence_number = -1
         for base_file_dir_element in base_file_dir_elements:
             if dir_depth == 0:
                 # MFT entry index of root directory = 5
                 if name_string == '.' and base_file_dir_element.mft_entry_header.index == 5:
-                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
+                    # if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
+                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number or base_file_dir_element.mft_entry_header.fixup > latest_update_sequence_number:
                         base_file_dir_element_with_latest_sequence_number[name_string] = base_file_dir_element
                         latest_sequence_number = base_file_dir_element.mft_entry_header.sequence_number
+                        latest_update_sequence_number = base_file_dir_element.mft_entry_header.fixup
                         if debug:
                             print("*" * 50)
                             print("name_string: {}".format(name_string))
@@ -590,9 +615,11 @@ def check_base_file_directories(base_file_directories, max_depth=-1):
                 parent_dir = list(base_file_directories.keys())[dir_depth-1]
                 parent_mft_entry_index = base_file_dir_element_with_latest_sequence_number[parent_dir].mft_entry_header.index
                 if base_file_dir_element.file_name_attribute.parent_file_reference.mft_entry_index == parent_mft_entry_index:
-                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
+                    # if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number:
+                    if base_file_dir_element.mft_entry_header.sequence_number > latest_sequence_number or base_file_dir_element.mft_entry_header.fixup > latest_update_sequence_number:
                         base_file_dir_element_with_latest_sequence_number[name_string] = base_file_dir_element
                         latest_sequence_number = base_file_dir_element.mft_entry_header.sequence_number
+                        latest_update_sequence_number = base_file_dir_element.mft_entry_header.fixup
                         if debug:
                             print("*" * 50)
                             print("name_string: {}".format(name_string))
@@ -618,6 +645,27 @@ def check_base_file_directories(base_file_directories, max_depth=-1):
         return False, base_file_dir_element_with_latest_sequence_number
 
 
+def read_mft_record(f_mft):
+    data = f_mft.read(1024)
+    if data == b'':
+        return None
+
+    mft_entry_header = MftEntryHeader()
+    io.BytesIO(data).readinto(mft_entry_header)
+    # if bytes(mft_entry_header.signature) == b'FILE' and mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IN_USE and mft_entry_header.total_entry_size in (1024, 4096):
+    # print(bin(mft_entry_header.entry_flags & (~0x000F & 0xFFFF)))
+    if bytes(mft_entry_header.signature) == b'FILE' and mft_entry_header.entry_flags & (~0x000F & 0xFFFF) == 0 and mft_entry_header.total_entry_size in (1024, 4096):
+        if mft_entry_header.total_entry_size == 1024:
+            return data
+        elif mft_entry_header.total_entry_size == 4096:
+            f_mft.seek(-1024, os.SEEK_CUR)
+            return f_mft.read(4096)
+        # else:  # Unsupported record size
+        #     return False
+
+    return False
+
+
 def analyze_mft_record(store_data_block_data, base_file_directories):
     base_file = list(base_file_directories.keys())[-1]
 
@@ -627,7 +675,10 @@ def analyze_mft_record(store_data_block_data, base_file_directories):
     data_offset = mft_entry_header.attribute_offset
 
     # https://github.com/libyal/libfsntfs/blob/main/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc#31-the-metadata-files
-    if bytes(mft_entry_header.signature) == b'FILE' and mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IN_USE and mft_entry_header.total_entry_size in (1024, 4096):
+    # if bytes(mft_entry_header.signature) == b'FILE' and mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IN_USE and mft_entry_header.total_entry_size in (1024, 4096):
+    if mft_entry_header.entry_flags & MftEntryFlags.MFT_RECORD_IN_USE:
+        mft_entry_header.fixup = struct.unpack_from("<H", store_data_block_data, offset=mft_entry_header.fixup_values_offset)[0]
+
         dbg_print('*' * 50)
         dbg_print("MFT entry size: {}".format(mft_entry_header.total_entry_size))
         mft_attribute_header = MftAttributeHeader()
@@ -718,6 +769,8 @@ def repair_base_file_directories(timestamp_candidates: dict, base_file_directori
     # for base_file_directories_collection in base_file_directories_collections:
     for collection_index, base_file_directories_collection in enumerate(base_file_directories_collections):
         if not base_file_directories_collection.mft and not base_file_directories_collection.found_all_records:
+            sys.stdout.write("Catalog entry: {} ... ".format(collection_index - 1))
+            sys.stdout.flush()
             base_file_name = list(base_file_directories_collection.base_file_directories.keys())[-1]
             prev_ts = get_prev_timestamp(base_file_directories_collection.base_file_directories[base_file_name][0].standard_information_attribute.modification_timestamp, sorted_timestamp)
             prev_base_file_directories_collection = get_prev_base_file_directories_collection(base_file_directories_collections, prev_ts)
@@ -768,7 +821,7 @@ def repair_base_file_directories(timestamp_candidates: dict, base_file_directori
                     #     record.print()
 
                     if result:
-                        print("Repaired catalog No.{}".format(collection_index - 1))
+                        print("Repaired catalog entry: {}".format(collection_index - 1))
                         base_file_directories_collection.base_file_records = base_file_records
                         # print("Fixed base_file_records:")
                         # for _path, _element in base_file_directories_collection.base_file_records.items():
@@ -817,7 +870,9 @@ def repair_base_file_directories(timestamp_candidates: dict, base_file_directori
                     #     record.print()
 
                     if result:
-                        print("Repaired catalog No.{}".format(collection_index - 1))
+                        # print("Repaired catalog No.{}".format(collection_index - 1))
+                        # print("Successfully complimented catalog entry: {}".format(collection_index - 1))
+                        print("Succeeded")
                         base_file_directories_collection.base_file_records = base_file_records
                         # print("Fixed base_file_records:")
                         # for _path, _element in base_file_directories_collection.base_file_records.items():
@@ -836,12 +891,16 @@ def repair_base_file_directories(timestamp_candidates: dict, base_file_directori
                     #     #         element.print()
                     #     # exit()
                     #     return False
-                    if not result:
-                        print("Could not repair catalog No.{}".format(collection_index - 1))
-                        for _path, _element in base_file_directories_collection.base_file_records.items():
+                    if path == base_file_name and not result:
+                        # print("Could not repair catalog No.{}".format(collection_index - 1))
+                        # print("Could not complimente catalog entry: {}".format(collection_index - 1))
+                        print("Failed")
+                        # for _path, _element in base_file_directories_collection.base_file_records.items():
+                        for _path, _elements in temp_directories.items():
                             print("_path: {}".format(_path))
-                            _element.print()
-                            print()
+                            for _element in _elements:
+                                _element.print()
+                                print()
 
     return True
 
@@ -938,22 +997,51 @@ def main():
 
     base_file_directories_collections = []
 
-    # Find base file path MFT entries from $MFT
     base_file_directories_mft = parse_basefile_path(args.basefile)
     print("=" * 60)
+    print("Base file = {}".format('/'.join(base_file_directories_mft)[1:]))
+
+    # Find base file path MFT entries from $MFT
+    print("=" * 60)
     print("Analyzing $MFT...")
+    sys.stdout.write("Finding MFT records of the base file path in $MFT ... ")
+    sys.stdout.flush()
+    # TODO: Directly read $MFT data from a disk image (low priority)
+    # Need to update MFT record parser which can recognize $DATA attribution
+    # The offset of $MFT is stored in boot sector
+    # Reference: https://qiita.com/kusano_k/items/45b0a86649aabb8040ff
     # TODO: Support 4K bytes MFT record
-    mft_record = f_mft.read(1024)
-    while mft_record != b'':
-        for _ in analyze_mft_record(mft_record, base_file_directories_mft):
-            pass
-        mft_record = f_mft.read(1024)
+    # mft_record = f_mft.read(1024)
+    # while mft_record != b'':
+    #     for _ in analyze_mft_record(mft_record, base_file_directories_mft):
+    #         pass
+    #     mft_record = f_mft.read(1024)
+
+    mft_record = b''
+    while mft_record is not None:
+        mft_record = read_mft_record(f_mft)
+        if mft_record:
+            for _ in analyze_mft_record(mft_record, base_file_directories_mft):
+                pass
+
+    # for _p, _es in base_file_directories_mft.items():
+    #     print("_p: {}".format(_p))
+    #     for _e in _es:
+    #         _e.print()
 
     result, base_file_records = check_base_file_directories(base_file_directories_mft)
     if result:
-        print("Found base file entry: {}".format(args.basefile))
+        # print("Found base file entry: {}".format(args.basefile))
+        # print("Found MFT records of the base file path.")
+        print("Found")
     else:
-        print("Could not found base file entry: {}".format(args.basefile))
+        if all([not x.mft_entry_header for x in base_file_records.values()]):
+            # print([not x.mft_entry_header for x in base_file_records.values()])
+            print("Not found")
+        else:
+            print("Incompletely found")
+        # print("Could not found base file entry: {}".format(args.basefile))
+        # print("Could not found MFT records of the base file path.")
         exit()
 
     base_file_directories_collections.append(BaseFileDirCollection(True, base_file_directories_mft, base_file_records, result))
@@ -961,14 +1049,18 @@ def main():
     # Find base file path MFT entries in every VSS snapshot
     print("=" * 60)
     print("Analyzing MFT records in every VSS snapshot...")
+    # print("Finding MFT records that comprise the base file path.")
+    print("Finding MFT records of the base file path.")
     timestamp_candidates = {}
-    for catalog_entry in list_catalog_entry:
+    for catalog_index, catalog_entry in enumerate(list_catalog_entry):
         base_file_directories = parse_basefile_path(args.basefile)
         # dbg_print("~*~" * 20)
         # dbg_print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
         # print("+" * 60)
-        print("-" * 60)
-        print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
+        # print("-" * 60)
+        sys.stdout.write("Catalog entry: {} ... ".format(catalog_index))
+        sys.stdout.flush()
+        dbg_print("catalog_entry.catalog0x03.store_block_list_offset: 0x{:x}".format(catalog_entry.catalog0x03.store_block_list_offset))
         for physical_data_offset, store_data_block_data in get_store_data_block_data(catalog_entry, f_store, disk_image, args.offset):
             dbg_print("=" * 50)
             dbg_print("MFT record offset of base file: 0x{:x}".format(physical_data_offset))
@@ -977,9 +1069,17 @@ def main():
 
         result, base_file_records = check_base_file_directories(base_file_directories)
         if result:
-            print("Found base file entry: {}".format(args.basefile))
+            # print("Found base file entry: {}".format(args.basefile))
+            # print("Found MFT records of the base file path.")
+            print("Found")
         else:
-            print("Could not found base file entry: {}".format(args.basefile))
+            # print("Could not found base file entry: {}".format(args.basefile))
+            # print("Could not found MFT records of the base file path.")
+            if all([not x.mft_entry_header for x in base_file_records.values()]):
+                # print([not x.mft_entry_header for x in base_file_records.values()])
+                print("Not found")
+            else:
+                print("Incompletely found")
             # for path, element in base_file_records.items():
             #     print("-" * 50)
             #     print("Path: {}".format(path))
@@ -991,7 +1091,8 @@ def main():
     if all([x.found_all_records for x in base_file_directories_collections]):
         print("Every VSS snapshot has base file path MFT entries.")
     else:
-        print("Trying to repair base file path MFT entries in VSS snapshots...")
+        # print("Trying to compliment base file path MFT entries in VSS snapshots...")
+        print("Trying to compliment MFT records of the base file path in VSS snapshots...")
         result = repair_base_file_directories(timestamp_candidates, base_file_directories_collections)
         if not result:
             print("Could not build a base file path in every VSS snapshot.")
@@ -1060,7 +1161,7 @@ def main():
     write_catalog(f_sorted_catalog, updated_list_catalog_entry)
     # print("-=" * 40)
     print("=" * 60)
-    print("Sorted catalog list")
+    print("Sorted catalog list:")
     print_entry(updated_list_catalog_entry)
 
     f_store.close()

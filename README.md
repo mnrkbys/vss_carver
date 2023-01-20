@@ -18,13 +18,19 @@ Carves and recreates VSS catalog and store from Windows disk image.
 vss_carver.py -t <disk_image_type> -o <volume_offset_in_bytes> -i <disk_image> -c <catalog_file> -s <store_file>
 ```
 
-2. (Optional) Manipulates VSS catalog entries
+2. Sort the catalog entries based on the $SI modification timestamp of the specified file. To sort the catalog entries correctly, it must be updated frequently (default: /Windows/System32/winevt/Logs/System.evtx).
+
+```bash
+vss_catalog_sorter.py -t <disk_image_type> -o <volume_offset_in_bytes> -i <disk_image> -c <catalog_file> -s <store_file> -m <exported_$MFT>
+```
+
+3. (Optional) Manipulates VSS catalog entries
 
 ```bash
 vss_catalog_manipulator.py {list,move,remove,enable,disable} (see more details with "-h")
 ```
 
-3. Mounts VSS snapshots with the use of extended vshadowmount (You can get pre-compiled vshadowmount from [here](https://github.com/mnrkbys/precompiled_libyal_libs))
+4. Mounts VSS snapshots with the use of extended vshadowmount (You can get pre-compiled vshadowmount from [here](https://github.com/mnrkbys/precompiled_libyal_libs))
 
 ```bash
 vshadowmount -o <volume_offset_in_bytes> -c <catalog_file> -s <store_file> <disk_image> <mount_point>

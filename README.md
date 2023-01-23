@@ -59,6 +59,12 @@ You have to compile libvshadow, libewf, and libvmdk. I'm offering patched source
 
 Do git clone them above, then follow the instructions to build [libvshadow](https://github.com/libyal/libvshadow/wiki/Building), [libewf](https://github.com/libyal/libewf/wiki/Building) and [libvmdk](https://github.com/libyal/libvmdk/wiki/Building).
 
+## Hey! I found a bug!!
+
+When you find a bug, don't just report error messages. In many cases, this is because the error message may not contain the root cause.
+
+So I need real disk images to fix the bug. Of course, this is not the case if the disk image contains private data.
+
 ## Author
 
 [Minoru Kobayashi](https://twitter.com/unkn0wnbit)
